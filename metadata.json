@@ -1,0 +1,6 @@
+{
+  "name": "TaskSync 团队任务协作平台",
+  "description": "一站式多人任务协作与沟通平台，包含看板、甘特图、项目实时沟通频道、任务跟踪与 AI Copilot 助手",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
