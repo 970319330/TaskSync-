@@ -100,3 +100,13 @@ export interface NotificationItem {
 }
 
 export type ViewMode = 'kanban' | 'list' | 'gantt' | 'analytics' | 'chat';
+
+export type AiProvider = 'gemini' | 'deepseek' | 'openai';
+
+export interface AiSettings {
+  provider: AiProvider;
+  apiKey: string;
+  model: string;
+  baseUrl: string;
+  hasApiKey?: boolean;
+}

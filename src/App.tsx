@@ -9,6 +9,8 @@ import {
   ViewMode,
   TaskStatus,
   TaskPriority,
+  AiSettings,
+  AiProvider,
 } from './types';
 import { Navbar } from './components/Navbar';
 import { MemberPresenceBar } from './components/MemberPresenceBar';
@@ -20,6 +22,9 @@ import { ChatHub } from './components/ChatHub';
 import { TaskDetailModal } from './components/TaskDetailModal';
 import { TaskDetailPage } from './components/TaskDetailPage';
 import { CreateTaskModal } from './components/CreateTaskModal';
+import { CreateProjectModal } from './components/CreateProjectModal';
+import { ProjectManageModal } from './components/ProjectManageModal';
+import { SettingsModal } from './components/SettingsModal';
 import { AiCopilotDrawer } from './components/AiCopilotDrawer';
 import { Loader2 } from 'lucide-react';
 
@@ -43,6 +48,10 @@ export default function App() {
   const [selectedTask, setSelectedTask] = useState<Task | null>(null);
   const [showCreateTaskModal, setShowCreateTaskModal] = useState(false);
   const [createTaskInitialStatus, setCreateTaskInitialStatus] = useState<TaskStatus>('todo');
+  const [showCreateProjectModal, setShowCreateProjectModal] = useState(false);
+  const [showManageProjectModal, setShowManageProjectModal] = useState(false);
+  const [showSettingsModal, setShowSettingsModal] = useState(false);
+  const [aiSettings, setAiSettings] = useState<AiSettings | null>(null);
   const [showAiCopilotDrawer, setShowAiCopilotDrawer] = useState(false);
   const [showNotificationsDropdown, setShowNotificationsDropdown] = useState(false);
   const [aiSummary, setAiSummary] = useState('');
@@ -70,6 +79,15 @@ export default function App() {
         if (!activeChannel && data.channels?.length > 0) {
           setActiveChannel(data.channels[0]);
         }
+      }
+
+      // 加载 AI 设置
+      try {
+        const sres = await fetch('/api/settings');
+        const sdata = await sres.json();
+        if (sdata) setAiSettings(sdata);
+      } catch (e) {
+        console.error('Failed to load AI settings:', e);
       }
     } catch (err) {
       console.error('Failed to load workspace state:', err);
@@ -194,6 +212,112 @@ export default function App() {
       if (data.tasks) setTasks(data.tasks);
     } catch (err) {
       console.error('Failed to delete task:', err);
+    }
+  };
+
+  // Create Project
+  const handleCreateProject = async (data: {
+    name: string;
+    key: string;
+    description: string;
+    color: string;
+    memberIds: string[];
+  }, importContent?: string) => {
+    try {
+      const res = await fetch('/api/projects', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(data),
+      });
+      const result = await res.json();
+      if (result.projects) {
+        setProjects(result.projects);
+        if (result.project) {
+          setActiveProject(result.project);
+
+          // 如有导入内容,触发 AI 拆分任务(modal 保持显示 loading 直至完成)
+          if (importContent) {
+            try {
+              const decomposeRes = await fetch('/api/copilot/import-decompose', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                  content: importContent,
+                  projectId: result.project.id,
+                  projectName: result.project.name,
+                  projectDescription: result.project.description,
+                  reporterId: currentMember?.id || 'usr_alex',
+                  assigneeIds: data.memberIds,
+                }),
+              });
+              const decomposeData = await decomposeRes.json();
+              if (decomposeData.allTasks) setTasks(decomposeData.allTasks);
+            } catch (e) {
+              console.error('Failed to import-decompose:', e);
+            }
+          }
+        }
+        // 项目创建(及拆分)完成后关闭弹窗
+        setShowCreateProjectModal(false);
+      }
+    } catch (err) {
+      console.error('Failed to create project:', err);
+    }
+  };
+
+  // Update Project
+  const handleUpdateProject = async (id: string, data: Partial<Project>) => {
+    setProjects((prev) => prev.map((p) => (p.id === id ? { ...p, ...data } : p)));
+    setActiveProject((prev) => (prev && prev.id === id ? { ...prev, ...data } : prev));
+    try {
+      const res = await fetch(`/api/projects/${id}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(data),
+      });
+      const result = await res.json();
+      if (result.projects) setProjects(result.projects);
+    } catch (err) {
+      console.error('Failed to update project:', err);
+    }
+  };
+
+  // Delete Project
+  const handleDeleteProject = async (id: string) => {
+    const remaining = projects.filter((p) => p.id !== id);
+    setProjects(remaining);
+    setTasks((prev) => prev.filter((t) => t.projectId !== id));
+    // 若删除的是当前活跃项目,切换到剩余第一个
+    if (activeProject?.id === id) {
+      setActiveProject(remaining[0] || null);
+    }
+    try {
+      const res = await fetch(`/api/projects/${id}`, { method: 'DELETE' });
+      const result = await res.json();
+      if (result.projects) setProjects(result.projects);
+      if (result.tasks) setTasks(result.tasks);
+    } catch (err) {
+      console.error('Failed to delete project:', err);
+    }
+  };
+
+  // Save AI Settings
+  const handleSaveSettings = async (data: {
+    provider: AiProvider;
+    apiKey: string;
+    model: string;
+    baseUrl: string;
+  }) => {
+    try {
+      const res = await fetch('/api/settings', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(data),
+      });
+      const result = await res.json();
+      if (result.settings) setAiSettings(result.settings);
+    } catch (err) {
+      console.error('Failed to save AI settings:', err);
     }
   };
 
@@ -330,6 +454,9 @@ export default function App() {
           setShowCreateTaskModal(true);
         }}
         onOpenAiCopilot={() => setShowAiCopilotDrawer(true)}
+        onOpenCreateProject={() => setShowCreateProjectModal(true)}
+        onOpenManageProject={() => setShowManageProjectModal(true)}
+        onOpenSettings={() => setShowSettingsModal(true)}
         notifications={notifications}
         showNotificationsDropdown={showNotificationsDropdown}
         onOpenNotifications={() => setShowNotificationsDropdown(!showNotificationsDropdown)}
@@ -434,6 +561,37 @@ export default function App() {
           activeProject={activeProject}
           onClose={() => setShowCreateTaskModal(false)}
           onSubmit={handleCreateTask}
+        />
+      )}
+
+      {/* Create Project Modal */}
+      {showCreateProjectModal && (
+        <CreateProjectModal
+          members={members}
+          onClose={() => setShowCreateProjectModal(false)}
+          onSubmit={handleCreateProject}
+        />
+      )}
+
+      {/* Project Management Modal */}
+      {showManageProjectModal && (
+        <ProjectManageModal
+          projects={projects}
+          members={members}
+          activeProject={activeProject}
+          onClose={() => setShowManageProjectModal(false)}
+          onUpdateProject={handleUpdateProject}
+          onDeleteProject={handleDeleteProject}
+          onSelectProject={(p) => setActiveProject(p)}
+        />
+      )}
+
+      {/* System Settings Modal */}
+      {showSettingsModal && (
+        <SettingsModal
+          settings={aiSettings}
+          onClose={() => setShowSettingsModal(false)}
+          onSave={handleSaveSettings}
         />
       )}
 

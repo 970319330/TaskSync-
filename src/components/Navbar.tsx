@@ -13,6 +13,7 @@ import {
   Layers,
   UserCheck,
   CheckCircle2,
+  Settings,
 } from 'lucide-react';
 import { Project, Member, ViewMode, NotificationItem } from '../types';
 import { NotificationDropdown } from './NotificationDropdown';
@@ -30,6 +31,9 @@ interface NavbarProps {
   onSearchChange: (q: string) => void;
   onOpenCreateTask: () => void;
   onOpenAiCopilot: () => void;
+  onOpenCreateProject: () => void;
+  onOpenManageProject: () => void;
+  onOpenSettings: () => void;
   notifications: NotificationItem[];
   showNotificationsDropdown: boolean;
   onOpenNotifications: () => void;
@@ -51,6 +55,9 @@ export const Navbar: React.FC<NavbarProps> = ({
   onSearchChange,
   onOpenCreateTask,
   onOpenAiCopilot,
+  onOpenCreateProject,
+  onOpenManageProject,
+  onOpenSettings,
   notifications,
   showNotificationsDropdown,
   onOpenNotifications,
@@ -131,6 +138,29 @@ export const Navbar: React.FC<NavbarProps> = ({
                     )}
                   </button>
                 ))}
+
+                <div className="border-t border-slate-100 mt-1 pt-1">
+                  <button
+                    onClick={() => {
+                      onOpenCreateProject();
+                      setShowProjectMenu(false);
+                    }}
+                    className="w-full text-left px-3 py-2 text-sm flex items-center gap-2.5 text-emerald-700 hover:bg-emerald-50 transition-colors cursor-pointer font-medium"
+                  >
+                    <Plus className="w-4 h-4 shrink-0" />
+                    <span>新建项目空间</span>
+                  </button>
+                  <button
+                    onClick={() => {
+                      onOpenManageProject();
+                      setShowProjectMenu(false);
+                    }}
+                    className="w-full text-left px-3 py-2 text-sm flex items-center gap-2.5 text-slate-600 hover:bg-slate-50 transition-colors cursor-pointer"
+                  >
+                    <Settings className="w-4 h-4 shrink-0 text-slate-400" />
+                    <span>管理项目</span>
+                  </button>
+                </div>
               </div>
             )}
           </div>
@@ -222,6 +252,16 @@ export const Navbar: React.FC<NavbarProps> = ({
               />
             )}
           </div>
+
+          {/* System Settings */}
+          <button
+            id="system-settings-btn"
+            onClick={onOpenSettings}
+            className="p-2 rounded-lg text-slate-600 hover:text-slate-900 hover:bg-slate-100 transition-colors cursor-pointer shrink-0"
+            title="系统设置"
+          >
+            <Settings className="w-4 h-4" />
+          </button>
 
           {/* Current Member Role Switcher */}
           <div className="relative shrink-0">

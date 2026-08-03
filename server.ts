@@ -1,7 +1,7 @@
 import express from 'express';
 import path from 'path';
 import { createServer as createViteServer } from 'vite';
-import { GoogleGenAI, Type } from '@google/genai';
+import { GoogleGenAI } from '@google/genai';
 import {
   INITIAL_MEMBERS,
   INITIAL_PROJECTS,
@@ -10,7 +10,7 @@ import {
   INITIAL_MESSAGES,
   INITIAL_NOTIFICATIONS,
 } from './src/mockData';
-import { Task, ChatMessage, TaskComment, TaskActivity, NotificationItem } from './src/types';
+import { Task, ChatMessage, TaskComment, TaskActivity, NotificationItem, Project } from './src/types';
 
 const app = express();
 const PORT = 3000;
@@ -25,15 +25,62 @@ let channels = [...INITIAL_CHANNELS];
 let messages: ChatMessage[] = [...INITIAL_MESSAGES];
 let notifications: NotificationItem[] = [...INITIAL_NOTIFICATIONS];
 
-// Initialize Gemini Client
-const ai = new GoogleGenAI({
-  apiKey: process.env.GEMINI_API_KEY || 'MOCK_KEY',
-  httpOptions: {
+// AI Settings (可在运行时通过 /api/settings 修改)
+let aiSettings: {
+  provider: 'gemini' | 'deepseek' | 'openai';
+  apiKey: string;
+  model: string;
+  baseUrl: string;
+} = {
+  provider: 'gemini',
+  apiKey: process.env.GEMINI_API_KEY || '',
+  model: 'gemini-3.6-flash',
+  baseUrl: '',
+};
+
+// 统一 LLM 调用:支持 Gemini 与 OpenAI 兼容接口(DeepSeek / OpenAI 等)
+async function callLLM(prompt: string, options: { jsonMode?: boolean } = {}): Promise<string> {
+  const { provider, apiKey, model, baseUrl } = aiSettings;
+  if (!apiKey) return '';
+
+  if (provider === 'gemini') {
+    const client = new GoogleGenAI({
+      apiKey,
+      httpOptions: { headers: { 'User-Agent': 'aistudio-build' } },
+    });
+    const response = await client.models.generateContent({
+      model: model || 'gemini-3.6-flash',
+      contents: prompt,
+      ...(options.jsonMode ? { config: { responseMimeType: 'application/json' } } : {}),
+    });
+    return response.text || '';
+  }
+
+  // OpenAI 兼容接口(deepseek / openai)
+  const base =
+    baseUrl ||
+    (provider === 'deepseek' ? 'https://api.deepseek.com/v1' : 'https://api.openai.com/v1');
+  const res = await fetch(`${base.replace(/\/$/, '')}/chat/completions`, {
+    method: 'POST',
     headers: {
-      'User-Agent': 'aistudio-build',
+      'Content-Type': 'application/json',
+      Authorization: `Bearer ${apiKey}`,
     },
-  },
-});
+    body: JSON.stringify({
+      model: model || (provider === 'deepseek' ? 'deepseek-v4-flash' : 'gpt-4o-mini'),
+      messages: [{ role: 'user', content: prompt }],
+      ...(options.jsonMode ? { response_format: { type: 'json_object' } } : {}),
+    }),
+  });
+
+  if (!res.ok) {
+    const errText = await res.text();
+    throw new Error(`LLM 请求失败 (${res.status}): ${errText}`);
+  }
+
+  const data = await res.json();
+  return data.choices?.[0]?.message?.content || '';
+}
 
 // API Routes
 app.get('/api/state', (req, res) => {
@@ -45,6 +92,83 @@ app.get('/api/state', (req, res) => {
     messages,
     notifications,
   });
+});
+
+// Create Project
+app.post('/api/projects', (req, res) => {
+  const data = req.body || {};
+  const newProject: Project = {
+    id: `proj_${Date.now()}`,
+    name: (data.name || '').trim() || '新项目空间',
+    key: (data.key || '').trim().toUpperCase() || `PRJ-${projects.length + 1}`,
+    description: data.description || '',
+    color: data.color || 'emerald',
+    memberIds: Array.isArray(data.memberIds) ? data.memberIds : [],
+  };
+  projects = [...projects, newProject];
+  res.json({ success: true, project: newProject, projects });
+});
+
+// Update Project
+app.put('/api/projects/:id', (req, res) => {
+  const { id } = req.params;
+  const updates = req.body || {};
+  let updated: Project | null = null;
+  projects = projects.map((p) => {
+    if (p.id === id) {
+      updated = {
+        ...p,
+        ...(updates.name !== undefined ? { name: updates.name } : {}),
+        ...(updates.key !== undefined ? { key: updates.key } : {}),
+        ...(updates.description !== undefined ? { description: updates.description } : {}),
+        ...(updates.color !== undefined ? { color: updates.color } : {}),
+        ...(Array.isArray(updates.memberIds) ? { memberIds: updates.memberIds } : {}),
+      };
+      return updated;
+    }
+    return p;
+  });
+  res.json({ success: true, project: updated, projects });
+});
+
+// Delete Project
+app.delete('/api/projects/:id', (req, res) => {
+  const { id } = req.params;
+  projects = projects.filter((p) => p.id !== id);
+  // 级联清理该项目的任务,避免孤儿任务
+  tasks = tasks.filter((t) => t.projectId !== id);
+  res.json({ success: true, projects, tasks });
+});
+
+// Get AI Settings (API Key 脱敏返回)
+app.get('/api/settings', (req, res) => {
+  const key = aiSettings.apiKey;
+  const maskedKey = key ? `${key.slice(0, 4)}****${key.slice(-4)}` : '';
+  res.json({ ...aiSettings, apiKey: maskedKey, hasApiKey: !!key });
+});
+
+// Update AI Settings
+app.put('/api/settings', (req, res) => {
+  const { provider, apiKey, model, baseUrl } = req.body || {};
+  const validProvider = ['gemini', 'deepseek', 'openai'].includes(provider) ? provider : aiSettings.provider;
+  const providerChanged = validProvider !== aiSettings.provider;
+  aiSettings = {
+    provider: validProvider,
+    // 切换供应商时,Key 跟随请求值(空则清空,强制为新供应商重填);
+    // 未切换时,含 **** 的脱敏回传值不覆盖原 Key
+    apiKey: providerChanged
+      ? typeof apiKey === 'string'
+        ? apiKey.trim()
+        : ''
+      : typeof apiKey === 'string' && apiKey.trim() && !apiKey.includes('****')
+        ? apiKey.trim()
+        : aiSettings.apiKey,
+    model: typeof model === 'string' ? model.trim() : aiSettings.model,
+    baseUrl: typeof baseUrl === 'string' ? baseUrl.trim() : aiSettings.baseUrl,
+  };
+  const key = aiSettings.apiKey;
+  const maskedKey = key ? `${key.slice(0, 4)}****${key.slice(-4)}` : '';
+  res.json({ success: true, settings: { ...aiSettings, apiKey: maskedKey, hasApiKey: !!key } });
 });
 
 // Update Member Status
@@ -254,21 +378,17 @@ app.post('/api/channels/:id/messages', async (req, res) => {
     let aiAnswer = '我是 TaskSync AI 协同助手。我已经分析了当前项目的任务状态，有什么需要我帮忙一键拆解或总结站会的吗？';
 
     try {
-      if (process.env.GEMINI_API_KEY) {
+      if (aiSettings.apiKey) {
         const prompt = `你是一个专业的敏捷项目管理 Copilot AI 助手。团队成员在聊天频道说："${content}"。
 结合当前任务数量 (${tasks.length}个) 和成员在线状态，给出专业、亲切、富有生产力建设性的简短回复 (不超过150字)。如果用户提到特定任务，可直接说明。`;
 
-        const response = await ai.models.generateContent({
-          model: 'gemini-3.6-flash',
-          contents: prompt,
-        });
-
-        if (response.text) {
-          aiAnswer = response.text;
+        const text = await callLLM(prompt);
+        if (text) {
+          aiAnswer = text;
         }
       }
     } catch (err) {
-      console.error('Gemini chat error:', err);
+      console.error('LLM chat error:', err);
     }
 
     const aiMsg: ChatMessage = {
@@ -294,7 +414,7 @@ app.post('/api/copilot/decompose', async (req, res) => {
   }
 
   try {
-    if (!process.env.GEMINI_API_KEY) {
+    if (!aiSettings.apiKey) {
       // Mock decomposition fallback if key not configured
       return res.json({
         title: `【AI拆解】${goal}`,
@@ -326,27 +446,7 @@ app.post('/api/copilot/decompose', async (req, res) => {
   "checklist": ["子任务项1", "子任务项2", "子任务项3", "子任务项4"]
 }`;
 
-    const response = await ai.models.generateContent({
-      model: 'gemini-3.6-flash',
-      contents: prompt,
-      config: {
-        responseMimeType: 'application/json',
-        responseSchema: {
-          type: Type.OBJECT,
-          properties: {
-            title: { type: Type.STRING },
-            description: { type: Type.STRING },
-            priority: { type: Type.STRING },
-            estimatedHours: { type: Type.NUMBER },
-            tags: { type: Type.ARRAY, items: { type: Type.STRING } },
-            checklist: { type: Type.ARRAY, items: { type: Type.STRING } },
-          },
-          required: ['title', 'description', 'priority', 'estimatedHours', 'tags', 'checklist'],
-        },
-      },
-    });
-
-    const jsonText = response.text?.trim() || '{}';
+    const jsonText = (await callLLM(prompt, { jsonMode: true })).trim() || '{}';
     const parsed = JSON.parse(jsonText);
 
     const checklistItems = (parsed.checklist || []).map((itemTitle: string, index: number) => ({
@@ -369,6 +469,109 @@ app.post('/api/copilot/decompose', async (req, res) => {
   }
 });
 
+// AI Import & Decompose: 导入文档/思维导图,LLM 拆分为多个任务并批量创建
+app.post('/api/copilot/import-decompose', async (req, res) => {
+  const { content, projectId, projectName, projectDescription, reporterId, assigneeIds } = req.body || {};
+
+  if (!content || !content.trim()) {
+    return res.status(400).json({ error: '导入内容为空' });
+  }
+  if (!projectId) {
+    return res.status(400).json({ error: '缺少项目 ID' });
+  }
+
+  // 未配置 Key 时返回空,前端可提示
+  if (!aiSettings.apiKey) {
+    return res.json({ tasks: [], allTasks: tasks, mock: true });
+  }
+
+  try {
+    const truncated = content.length > 8000 ? content.slice(0, 8000) + '\n...(内容已截断)' : content;
+
+    const prompt = `你是一个经验丰富的敏捷项目管理大师。用户正在创建一个新项目,并提供了项目的需求文档 / 思维导图大纲 / 会议纪要等内容。请仔细阅读并理解其结构与意图,将其拆分为 5-15 个具体可执行的敏捷任务。
+
+项目名称: "${projectName || ''}"
+项目描述: "${projectDescription || ''}"
+
+导入的内容:
+"""
+${truncated}
+"""
+
+拆分要求:
+- 每个任务应有明确的标题、详细描述、推荐优先级(urgent/high/medium/low)、估计工时(小时)、2-3 个标签
+- 为每个任务生成 3-6 条具体可执行的子任务清单(checklist)
+- 任务应覆盖项目的主要工作流与交付物,粒度适中
+
+请严格以 JSON 格式输出,不要打任何 markdown 代码块或附加文字,格式必须符合:
+{
+  "tasks": [
+    {
+      "title": "任务标题",
+      "description": "详细任务说明与注意事项",
+      "priority": "high",
+      "estimatedHours": 12,
+      "tags": ["标签1", "标签2"],
+      "checklist": ["子任务1", "子任务2"]
+    }
+  ]
+}`;
+
+    const jsonText = (await callLLM(prompt, { jsonMode: true })).trim() || '{}';
+    const parsed = JSON.parse(jsonText);
+    const llmTasks = Array.isArray(parsed.tasks) ? parsed.tasks : [];
+
+    const nowStr = new Date().toISOString().replace('T', ' ').substring(0, 16);
+    const today = nowStr.substring(0, 10);
+    const fallbackAssignees = Array.isArray(assigneeIds) ? assigneeIds : [];
+
+    const createdTasks: Task[] = llmTasks.map((t: any, idx: number) => {
+      const newId = `TS-${100 + tasks.length + idx + 1}`;
+      const checklistItems = (t.checklist || []).map((itemTitle: string, i: number) => ({
+        id: `chk_imp_${Date.now()}_${idx}_${i}`,
+        title: itemTitle,
+        completed: false,
+      }));
+      return {
+        id: newId,
+        title: t.title || `导入任务 ${idx + 1}`,
+        description: t.description || '',
+        status: 'todo' as const,
+        priority: ['urgent', 'high', 'medium', 'low'].includes(t.priority) ? t.priority : 'medium',
+        assigneeIds: fallbackAssignees,
+        reporterId: reporterId || 'usr_alex',
+        projectId,
+        startDate: today,
+        dueDate: today,
+        estimatedHours: Number(t.estimatedHours) || 8,
+        tags: Array.isArray(t.tags) ? t.tags : ['导入'],
+        checklist: checklistItems,
+        comments: [],
+        activities: [
+          {
+            id: `act_${Date.now()}_${idx}`,
+            taskId: newId,
+            authorId: reporterId || 'usr_alex',
+            action: '通过导入文档 AI 拆分创建',
+            timestamp: nowStr,
+          },
+        ],
+        attachmentsCount: 0,
+        createdAt: nowStr,
+        updatedAt: nowStr,
+      };
+    });
+
+    // 批量加入(最新在前)
+    tasks = [...createdTasks, ...tasks];
+
+    res.json({ tasks: createdTasks, allTasks: tasks });
+  } catch (error: any) {
+    console.error('Import decompose error:', error);
+    res.status(500).json({ error: error.message || '导入拆分服务异常' });
+  }
+});
+
 // AI Copilot Sprint Summarizer Endpoint
 app.post('/api/copilot/summarize', async (req, res) => {
   try {
@@ -380,7 +583,7 @@ app.post('/api/copilot/summarize', async (req, res) => {
       assignees: t.assigneeIds.map((id) => members.find((m) => m.id === id)?.name || id),
     }));
 
-    if (!process.env.GEMINI_API_KEY) {
+    if (!aiSettings.apiKey) {
       return res.json({
         summary: `📊 **Sprint 24 进展快照 (Mock)**
 • **已完成任务**: 1项 (TS-105 DevOps 流水线)
@@ -400,12 +603,8 @@ app.post('/api/copilot/summarize', async (req, res) => {
 当前任务数据:
 ${JSON.stringify(taskSummaryData, null, 2)}`;
 
-    const response = await ai.models.generateContent({
-      model: 'gemini-3.6-flash',
-      contents: prompt,
-    });
-
-    res.json({ summary: response.text || '暂无总结' });
+    const text = await callLLM(prompt);
+    res.json({ summary: text || '暂无总结' });
   } catch (err: any) {
     res.status(500).json({ error: err.message || '生成总结失败' });
   }
