@@ -213,9 +213,17 @@ export const KanbanBoard: React.FC<KanbanBoardProps> = ({
                         </p>
                       )}
 
-                      {/* Tags */}
-                      {tags.length > 0 && (
-                        <div className="flex flex-wrap gap-1 mb-2.5">
+                      {/* Tags & Tester badge */}
+                      {(tags.length > 0 || task.testerId) && (
+                        <div className="flex flex-wrap items-center gap-1 mb-2.5">
+                          {task.testerId && (
+                            <span
+                              className="text-[10px] font-semibold bg-indigo-50 text-indigo-800 border border-indigo-200 px-1.5 py-0.5 rounded flex items-center gap-1 shadow-2xs"
+                              title={`流转测试负责人: ${members.find((m) => m.id === task.testerId)?.name}`}
+                            >
+                              🧪 测试: {members.find((m) => m.id === task.testerId)?.name.split(' ')[0] || '设置'}
+                            </span>
+                          )}
                           {tags.map((tag, idx) => (
                             <span
                               key={idx}

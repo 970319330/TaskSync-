@@ -111,10 +111,10 @@ export const INITIAL_TASKS: Task[] = [
     estimatedHours: 16,
     tags: ['前端', 'WebSocket', '核心功能'],
     checklist: [
-      { id: 'chk_1', title: '定义广播消息 JSON Schema', completed: true },
-      { id: 'chk_2', title: '前端建立心跳重连机制', completed: true },
-      { id: 'chk_3', title: '卡片状态变动动画与乐观 UI 更新', completed: false },
-      { id: 'chk_4', title: '多端冲突解决机制测试', completed: false },
+      { id: 'chk_1', title: '定义广播消息 JSON Schema', completed: true, assigneeId: 'usr_alex' },
+      { id: 'chk_2', title: '前端建立心跳重连机制', completed: true, assigneeId: 'usr_sarah' },
+      { id: 'chk_3', title: '卡片状态变动动画与乐观 UI 更新', completed: false, assigneeId: 'usr_sarah' },
+      { id: 'chk_4', title: '多端冲突解决机制测试', completed: false, assigneeId: 'usr_david' },
     ],
     comments: [
       {

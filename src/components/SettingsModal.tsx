@@ -5,7 +5,15 @@ import { X, Settings, KeyRound, Cpu, Link2, Check, Eye, EyeOff, Sparkles } from 
 interface SettingsModalProps {
   settings: AiSettings | null;
   onClose: () => void;
-  onSave: (data: { provider: AiProvider; apiKey: string; model: string; baseUrl: string }) => void;
+  onSave: (data: {
+    provider: AiProvider;
+    apiKey: string;
+    model: string;
+    baseUrl: string;
+    keys: Record<AiProvider, string>;
+    models: Record<AiProvider, string>;
+    baseUrls: Record<AiProvider, string>;
+  }) => void;
 }
 
 // 各供应商预设
@@ -37,43 +45,82 @@ const PROVIDER_PRESETS: Record<
 };
 
 export const SettingsModal: React.FC<SettingsModalProps> = ({ settings, onClose, onSave }) => {
-  const [provider, setProvider] = useState<AiProvider>(settings?.provider || 'gemini');
-  const [apiKey, setApiKey] = useState(settings?.apiKey || '');
-  const [model, setModel] = useState(settings?.model || PROVIDER_PRESETS[settings?.provider || 'gemini'].defaultModel);
-  const [baseUrl, setBaseUrl] = useState(settings?.baseUrl || '');
+  const initialProvider: AiProvider = settings?.provider || 'gemini';
+  const [provider, setProvider] = useState<AiProvider>(initialProvider);
+
+  // 针对每个供应商单独保存 key、model、baseUrl
+  const [keys, setKeys] = useState<Record<AiProvider, string>>({
+    gemini: settings?.keys?.gemini || (settings?.provider === 'gemini' ? settings?.apiKey || '' : ''),
+    deepseek: settings?.keys?.deepseek || (settings?.provider === 'deepseek' ? settings?.apiKey || '' : ''),
+    openai: settings?.keys?.openai || (settings?.provider === 'openai' ? settings?.apiKey || '' : ''),
+  });
+
+  const [models, setModels] = useState<Record<AiProvider, string>>({
+    gemini: settings?.models?.gemini || PROVIDER_PRESETS.gemini.defaultModel,
+    deepseek: settings?.models?.deepseek || PROVIDER_PRESETS.deepseek.defaultModel,
+    openai: settings?.models?.openai || PROVIDER_PRESETS.openai.defaultModel,
+  });
+
+  const [baseUrls, setBaseUrls] = useState<Record<AiProvider, string>>({
+    gemini: settings?.baseUrls?.gemini || '',
+    deepseek: settings?.baseUrls?.deepseek || PROVIDER_PRESETS.deepseek.defaultBaseUrl,
+    openai: settings?.baseUrls?.openai || PROVIDER_PRESETS.openai.defaultBaseUrl,
+  });
+
+  const [hasApiKeys, setHasApiKeys] = useState<Record<AiProvider, boolean>>({
+    gemini: settings?.hasApiKeys?.gemini || false,
+    deepseek: settings?.hasApiKeys?.deepseek || false,
+    openai: settings?.hasApiKeys?.openai || false,
+  });
+
   const [showKey, setShowKey] = useState(false);
   const [saved, setSaved] = useState(false);
-  const [switched, setSwitched] = useState(false);
 
   const preset = PROVIDER_PRESETS[provider];
 
   const handleSwitchProvider = (p: AiProvider) => {
     setProvider(p);
-    setSwitched(true);
-    // 切换供应商:不同供应商 Key 不同,清空让用户重新填写
-    setApiKey('');
-    const nextPreset = PROVIDER_PRESETS[p];
-    // 若当前 model 为空或属于某供应商默认值,则填充新供应商默认 model
-    const isDefaultModel =
-      !model || Object.values(PROVIDER_PRESETS).some((pr) => pr.defaultModel === model);
-    if (isDefaultModel) setModel(nextPreset.defaultModel);
+  };
 
-    // Base URL:gemini 置空;否则为空或默认值时填充新默认
-    if (p === 'gemini') {
-      setBaseUrl('');
-    } else {
-      const isDefaultBaseUrl =
-        !baseUrl || Object.values(PROVIDER_PRESETS).some((pr) => pr.defaultBaseUrl === baseUrl);
-      if (isDefaultBaseUrl) setBaseUrl(nextPreset.defaultBaseUrl);
-    }
+  const handleKeyChange = (val: string) => {
+    setKeys((prev) => ({ ...prev, [provider]: val }));
+  };
+
+  const handleModelChange = (val: string) => {
+    setModels((prev) => ({ ...prev, [provider]: val }));
+  };
+
+  const handleBaseUrlChange = (val: string) => {
+    setBaseUrls((prev) => ({ ...prev, [provider]: val }));
   };
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
-    onSave({ provider, apiKey, model: model.trim(), baseUrl: baseUrl.trim() });
+    const currentKey = keys[provider] || '';
+    const currentModel = (models[provider] || preset.defaultModel).trim();
+    const currentBaseUrl = (baseUrls[provider] || preset.defaultBaseUrl).trim();
+
+    onSave({
+      provider,
+      apiKey: currentKey,
+      model: currentModel,
+      baseUrl: currentBaseUrl,
+      keys,
+      models,
+      baseUrls,
+    });
+
+    // 如果填写了 key，更新状态指示
+    if (currentKey) {
+      setHasApiKeys((prev) => ({ ...prev, [provider]: true }));
+    }
+
     setSaved(true);
     setTimeout(() => setSaved(false), 2000);
   };
+
+  const currentKeyVal = keys[provider] || '';
+  const isKeySavedOnServer = hasApiKeys[provider];
 
   return (
     <div className="fixed inset-0 z-50 bg-slate-900/50 backdrop-blur-xs flex items-center justify-center p-3 sm:p-6 overflow-y-auto">
@@ -87,7 +134,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ settings, onClose,
             </div>
             <div>
               <h2 className="font-bold text-slate-900 text-base sm:text-lg">系统设置</h2>
-              <p className="text-[11px] text-slate-500">配置底层大模型与 API 凭证,影响 AI 拆解 / 总结 / Copilot</p>
+              <p className="text-[11px] text-slate-500">配置底层大模型与 API 凭证（各模型 Key 独立保存）</p>
             </div>
           </div>
           <button
@@ -109,18 +156,22 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ settings, onClose,
             <div className="grid grid-cols-3 gap-2">
               {(Object.keys(PROVIDER_PRESETS) as AiProvider[]).map((p) => {
                 const isSelected = provider === p;
+                const isConfigured = hasApiKeys[p] || (keys[p] && keys[p].trim().length > 0);
                 return (
                   <button
                     key={p}
                     type="button"
                     onClick={() => handleSwitchProvider(p)}
-                    className={`px-3 py-2.5 rounded-xl text-xs font-bold border transition-all cursor-pointer ${
+                    className={`px-3.5 py-2.5 rounded-xl text-xs font-bold border transition-all cursor-pointer flex items-center justify-between ${
                       isSelected
                         ? 'bg-emerald-50 border-emerald-400 text-emerald-800 shadow-xs ring-1 ring-emerald-300'
                         : 'bg-white border-slate-200 text-slate-600 hover:bg-slate-50'
                     }`}
                   >
-                    {PROVIDER_PRESETS[p].label}
+                    <span>{PROVIDER_PRESETS[p].label}</span>
+                    {isConfigured && (
+                      <span className="w-2 h-2 rounded-full bg-emerald-500 shrink-0" title="已保存 Key" />
+                    )}
                   </button>
                 );
               })}
@@ -129,21 +180,26 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ settings, onClose,
 
           {/* API Key */}
           <div>
-            <label className="text-xs font-bold text-slate-700 block mb-1.5 uppercase tracking-wider">
-              <KeyRound className="w-3.5 h-3.5 inline mr-1.5 -mt-0.5" />
-              API Key
-            </label>
+            <div className="flex items-center justify-between mb-1.5">
+              <label className="text-xs font-bold text-slate-700 uppercase tracking-wider">
+                <KeyRound className="w-3.5 h-3.5 inline mr-1.5 -mt-0.5" />
+                {preset.label} API Key
+              </label>
+              {isKeySavedOnServer && !currentKeyVal && (
+                <span className="text-[11px] font-semibold text-emerald-700 bg-emerald-50 px-2 py-0.5 rounded-md border border-emerald-200">
+                  已保存在服务器
+                </span>
+              )}
+            </div>
             <div className="relative">
               <input
                 type={showKey ? 'text' : 'password'}
-                value={apiKey}
-                onChange={(e) => setApiKey(e.target.value)}
+                value={currentKeyVal}
+                onChange={(e) => handleKeyChange(e.target.value)}
                 placeholder={
-                  switched
-                    ? `请填写 ${preset.label} 的 API Key`
-                    : settings?.hasApiKey
-                      ? '已配置(••••),输入新 Key 覆盖'
-                      : '粘贴你的 API Key'
+                  isKeySavedOnServer
+                    ? '已配置 (••••)，输入新 Key 可覆盖，保留留空'
+                    : `粘贴你的 ${preset.label} API Key`
                 }
                 className="w-full bg-white border border-slate-200 rounded-xl pl-3.5 pr-10 py-2.5 text-sm text-slate-900 placeholder-slate-400 focus:outline-none focus:border-emerald-500 shadow-2xs font-mono"
               />
@@ -160,7 +216,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ settings, onClose,
               {provider === 'gemini' && '在 Google AI Studio 获取 API Key。'}
               {provider === 'deepseek' && '在 DeepSeek 开放平台获取 API Key。'}
               {provider === 'openai' && '在 OpenAI 或兼容服务后台获取 Key。'}
-              {' Key 仅存于服务端内存,不落盘。'}
+              {' 切换模型时，不同供应商的 Key 会独立保留。'}
             </p>
           </div>
 
@@ -171,8 +227,8 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ settings, onClose,
             </label>
             <input
               type="text"
-              value={model}
-              onChange={(e) => setModel(e.target.value)}
+              value={models[provider]}
+              onChange={(e) => handleModelChange(e.target.value)}
               placeholder={preset.defaultModel}
               className="w-full bg-white border border-slate-200 rounded-xl px-3.5 py-2.5 text-sm text-slate-900 placeholder-slate-400 focus:outline-none focus:border-emerald-500 shadow-2xs font-mono"
             />
@@ -188,8 +244,8 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ settings, onClose,
               </label>
               <input
                 type="text"
-                value={baseUrl}
-                onChange={(e) => setBaseUrl(e.target.value)}
+                value={baseUrls[provider]}
+                onChange={(e) => handleBaseUrlChange(e.target.value)}
                 placeholder={preset.defaultBaseUrl}
                 className="w-full bg-white border border-slate-200 rounded-xl px-3.5 py-2.5 text-sm text-slate-900 placeholder-slate-400 focus:outline-none focus:border-emerald-500 shadow-2xs font-mono"
               />
@@ -201,8 +257,8 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ settings, onClose,
           <div className="bg-slate-50 border border-slate-200 rounded-xl p-3 flex items-start gap-2.5">
             <Sparkles className="w-4 h-4 text-emerald-600 shrink-0 mt-0.5" />
             <p className="text-[11px] text-slate-600 leading-relaxed">
-              当前配置将作用于:<strong>AI 一键拆解子任务</strong>、<strong>Sprint 智能总结</strong>、<strong>团队沟通 @copilot</strong>。
-              未配置 Key 时上述功能将回退为内置 Mock 演示数据。
+              当前选择的 <strong>{preset.label}</strong> 将用于: <strong>AI 一键拆解子任务</strong>、<strong>Sprint 智能总结</strong>、<strong>团队沟通 @copilot</strong>。
+              不同模型的 API Key 会独立独立保存，切换时无需重新输入。
             </p>
           </div>
 
@@ -229,3 +285,4 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ settings, onClose,
     </div>
   );
 };
+

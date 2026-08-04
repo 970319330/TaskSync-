@@ -56,6 +56,9 @@ export interface Task {
   comments: TaskComment[];
   activities: TaskActivity[];
   attachmentsCount: number;
+  testerId?: string;
+  autoFlowToTest?: boolean;
+  completeDevAndFlow?: boolean;
   createdAt: string;
   updatedAt: string;
 }
@@ -109,4 +112,8 @@ export interface AiSettings {
   model: string;
   baseUrl: string;
   hasApiKey?: boolean;
+  keys?: Record<AiProvider, string>;
+  models?: Record<AiProvider, string>;
+  baseUrls?: Record<AiProvider, string>;
+  hasApiKeys?: Record<AiProvider, boolean>;
 }

@@ -134,6 +134,17 @@ export const TaskDetailModal: React.FC<TaskDetailModalProps> = ({
               <option value="medium">🔵 中等 (Medium)</option>
               <option value="low">⚪ 低级 (Low)</option>
             </select>
+
+            {/* Quick Flow to Test Button */}
+            {task.status !== 'review' && task.status !== 'done' && (
+              <button
+                onClick={() => onUpdateTask({ completeDevAndFlow: true, status: 'review' })}
+                className="bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-bold px-3 py-1 rounded-xl flex items-center gap-1 shadow-2xs transition-all cursor-pointer ml-1"
+                title="开发完成，自动流转至测试/代码评审并转交测试人员"
+              >
+                🚀 开发完成，提交测试
+              </button>
+            )}
           </div>
 
           <button
@@ -422,6 +433,40 @@ export const TaskDetailModal: React.FC<TaskDetailModalProps> = ({
                   onChange={(e) => onUpdateTask({ estimatedHours: Number(e.target.value) })}
                   className="w-full bg-white border border-slate-200 rounded-lg p-1.5 text-slate-800 focus:outline-none focus:border-emerald-500 font-mono"
                 />
+              </div>
+            </div>
+
+            {/* QA Workflow Transition Settings */}
+            <div className="pt-3 border-t border-slate-200 text-xs space-y-2">
+              <label className="text-xs font-semibold text-slate-700 block uppercase tracking-wider">
+                测试/审核流转设置
+              </label>
+              <div className="bg-indigo-50/70 p-2.5 rounded-xl border border-indigo-150 space-y-2">
+                <div>
+                  <span className="text-slate-600 block mb-1">测试负责人 (Tester)</span>
+                  <select
+                    value={task.testerId || ''}
+                    onChange={(e) => onUpdateTask({ testerId: e.target.value })}
+                    className="w-full bg-white border border-indigo-200 rounded-lg p-1.5 text-slate-800 focus:outline-none focus:border-indigo-500 font-medium"
+                  >
+                    <option value="">未指定 (保留原经办人)</option>
+                    {(members || []).map((m) => (
+                      <option key={m.id} value={m.id}>
+                        {m.name} ({m.role})
+                      </option>
+                    ))}
+                  </select>
+                </div>
+
+                <label className="flex items-center gap-1.5 cursor-pointer pt-0.5">
+                  <input
+                    type="checkbox"
+                    checked={task.autoFlowToTest !== false}
+                    onChange={(e) => onUpdateTask({ autoFlowToTest: e.target.checked })}
+                    className="rounded border-indigo-300 text-indigo-600 focus:ring-indigo-500 cursor-pointer"
+                  />
+                  <span className="text-[11px] text-slate-700 font-medium">开发完成自动流转测试</span>
+                </label>
               </div>
             </div>
 

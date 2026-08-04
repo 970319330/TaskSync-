@@ -25,22 +25,68 @@ let channels = [...INITIAL_CHANNELS];
 let messages: ChatMessage[] = [...INITIAL_MESSAGES];
 let notifications: NotificationItem[] = [...INITIAL_NOTIFICATIONS];
 
-// AI Settings (可在运行时通过 /api/settings 修改)
-let aiSettings: {
-  provider: 'gemini' | 'deepseek' | 'openai';
-  apiKey: string;
-  model: string;
-  baseUrl: string;
-} = {
-  provider: 'gemini',
-  apiKey: process.env.GEMINI_API_KEY || '',
-  model: 'gemini-3.6-flash',
-  baseUrl: '',
+// AI Settings (每个供应商独立保存凭证与模型配置)
+type AiProvider = 'gemini' | 'deepseek' | 'openai';
+
+let activeProvider: AiProvider = 'gemini';
+
+let apiKeysByProvider: Record<AiProvider, string> = {
+  gemini: process.env.GEMINI_API_KEY || '',
+  deepseek: '',
+  openai: '',
 };
+
+let providerConfigs: Record<AiProvider, { model: string; baseUrl: string }> = {
+  gemini: {
+    model: 'gemini-3.6-flash',
+    baseUrl: '',
+  },
+  deepseek: {
+    model: 'deepseek-v4-flash',
+    baseUrl: 'https://api.deepseek.com/v1',
+  },
+  openai: {
+    model: 'gpt-4o-mini',
+    baseUrl: 'https://api.openai.com/v1',
+  },
+};
+
+function getSettingsResponse() {
+  const keys: Record<AiProvider, string> = { gemini: '', deepseek: '', openai: '' };
+  const hasApiKeys: Record<AiProvider, boolean> = { gemini: false, deepseek: false, openai: false };
+  const models: Record<AiProvider, string> = { gemini: '', deepseek: '', openai: '' };
+  const baseUrls: Record<AiProvider, string> = { gemini: '', deepseek: '', openai: '' };
+
+  (Object.keys(apiKeysByProvider) as AiProvider[]).forEach((p) => {
+    const k = apiKeysByProvider[p];
+    keys[p] = k ? `${k.slice(0, 4)}****${k.slice(-4)}` : '';
+    hasApiKeys[p] = !!k;
+    models[p] = providerConfigs[p].model;
+    baseUrls[p] = providerConfigs[p].baseUrl;
+  });
+
+  const currentKey = apiKeysByProvider[activeProvider];
+  const currentMaskedKey = currentKey ? `${currentKey.slice(0, 4)}****${currentKey.slice(-4)}` : '';
+
+  return {
+    provider: activeProvider,
+    apiKey: currentMaskedKey,
+    model: providerConfigs[activeProvider].model,
+    baseUrl: providerConfigs[activeProvider].baseUrl,
+    hasApiKey: !!currentKey,
+    keys,
+    hasApiKeys,
+    models,
+    baseUrls,
+  };
+}
 
 // 统一 LLM 调用:支持 Gemini 与 OpenAI 兼容接口(DeepSeek / OpenAI 等)
 async function callLLM(prompt: string, options: { jsonMode?: boolean } = {}): Promise<string> {
-  const { provider, apiKey, model, baseUrl } = aiSettings;
+  const provider = activeProvider;
+  const apiKey = apiKeysByProvider[provider];
+  const { model, baseUrl } = providerConfigs[provider];
+
   if (!apiKey) return '';
 
   if (provider === 'gemini') {
@@ -140,35 +186,67 @@ app.delete('/api/projects/:id', (req, res) => {
   res.json({ success: true, projects, tasks });
 });
 
-// Get AI Settings (API Key 脱敏返回)
+// Get AI Settings (API Key 脱敏返回，返回全量各供应商 Key 与配置状态)
 app.get('/api/settings', (req, res) => {
-  const key = aiSettings.apiKey;
-  const maskedKey = key ? `${key.slice(0, 4)}****${key.slice(-4)}` : '';
-  res.json({ ...aiSettings, apiKey: maskedKey, hasApiKey: !!key });
+  res.json(getSettingsResponse());
 });
 
 // Update AI Settings
 app.put('/api/settings', (req, res) => {
-  const { provider, apiKey, model, baseUrl } = req.body || {};
-  const validProvider = ['gemini', 'deepseek', 'openai'].includes(provider) ? provider : aiSettings.provider;
-  const providerChanged = validProvider !== aiSettings.provider;
-  aiSettings = {
-    provider: validProvider,
-    // 切换供应商时,Key 跟随请求值(空则清空,强制为新供应商重填);
-    // 未切换时,含 **** 的脱敏回传值不覆盖原 Key
-    apiKey: providerChanged
-      ? typeof apiKey === 'string'
-        ? apiKey.trim()
-        : ''
-      : typeof apiKey === 'string' && apiKey.trim() && !apiKey.includes('****')
-        ? apiKey.trim()
-        : aiSettings.apiKey,
-    model: typeof model === 'string' ? model.trim() : aiSettings.model,
-    baseUrl: typeof baseUrl === 'string' ? baseUrl.trim() : aiSettings.baseUrl,
-  };
-  const key = aiSettings.apiKey;
-  const maskedKey = key ? `${key.slice(0, 4)}****${key.slice(-4)}` : '';
-  res.json({ success: true, settings: { ...aiSettings, apiKey: maskedKey, hasApiKey: !!key } });
+  const { provider, apiKey, model, baseUrl, keys, models, baseUrls } = req.body || {};
+
+  if (provider && ['gemini', 'deepseek', 'openai'].includes(provider)) {
+    activeProvider = provider as AiProvider;
+  }
+
+  // 如果客户端提交了多供应商配置 maps (keys, models, baseUrls)
+  if (keys && typeof keys === 'object') {
+    (Object.keys(keys) as AiProvider[]).forEach((p) => {
+      if (['gemini', 'deepseek', 'openai'].includes(p)) {
+        const val = keys[p];
+        if (typeof val === 'string') {
+          const trimmed = val.trim();
+          // 仅在不是脱敏占位符 **** 时更新，允许用户传空字符串清空
+          if (!trimmed.includes('****')) {
+            apiKeysByProvider[p] = trimmed;
+          }
+        }
+      }
+    });
+  }
+
+  if (models && typeof models === 'object') {
+    (Object.keys(models) as AiProvider[]).forEach((p) => {
+      if (['gemini', 'deepseek', 'openai'].includes(p) && typeof models[p] === 'string') {
+        const trimmed = models[p].trim();
+        if (trimmed) providerConfigs[p].model = trimmed;
+      }
+    });
+  }
+
+  if (baseUrls && typeof baseUrls === 'object') {
+    (Object.keys(baseUrls) as AiProvider[]).forEach((p) => {
+      if (['gemini', 'deepseek', 'openai'].includes(p) && typeof baseUrls[p] === 'string') {
+        providerConfigs[p].baseUrl = baseUrls[p].trim();
+      }
+    });
+  }
+
+  // 单值兼容兜底 (仅针对当前选择的 activeProvider)
+  if (typeof apiKey === 'string') {
+    const trimmed = apiKey.trim();
+    if (trimmed && !trimmed.includes('****')) {
+      apiKeysByProvider[activeProvider] = trimmed;
+    }
+  }
+  if (typeof model === 'string' && model.trim()) {
+    providerConfigs[activeProvider].model = model.trim();
+  }
+  if (typeof baseUrl === 'string') {
+    providerConfigs[activeProvider].baseUrl = baseUrl.trim();
+  }
+
+  res.json({ success: true, settings: getSettingsResponse() });
 });
 
 // Update Member Status
@@ -202,6 +280,8 @@ app.post('/api/tasks', (req, res) => {
     tags: newTaskData.tags || ['新增'],
     checklist: newTaskData.checklist || [],
     comments: [],
+    testerId: newTaskData.testerId || '',
+    autoFlowToTest: newTaskData.autoFlowToTest !== false,
     activities: [
       {
         id: `act_${Date.now()}`,
@@ -253,23 +333,70 @@ app.put('/api/tasks/:id', (req, res) => {
       const activities = [...t.activities];
       const authorId = updates.actorId || 'usr_alex';
 
-      // Log status change activity
-      if (updates.status && updates.status !== t.status) {
-        const statusMap: Record<string, string> = {
-          backlog: 'Backlog 积压',
-          todo: '待办 (To Do)',
-          in_progress: '进行中 (In Progress)',
-          review: '代码评审 (Code Review)',
-          done: '已完成 (Done)',
-        };
-        activities.unshift({
-          id: `act_${Date.now()}`,
-          taskId: id,
-          authorId,
-          action: '更新了任务状态',
-          details: `由 "${statusMap[t.status]}" 更改为 "${statusMap[updates.status]}"`,
-          timestamp: nowStr,
-        });
+      const finalTesterId = updates.testerId !== undefined ? updates.testerId : t.testerId;
+      const finalAutoFlow =
+        updates.autoFlowToTest !== undefined ? updates.autoFlowToTest : t.autoFlowToTest !== false;
+
+      // 判断是否触发“开发完成流转测试”
+      const isEnteringReview = updates.status === 'review' || updates.completeDevAndFlow === true;
+      const wasNotInReview = t.status !== 'review';
+
+      if (isEnteringReview && wasNotInReview && finalAutoFlow) {
+        updates.status = 'review';
+        if (finalTesterId) {
+          updates.assigneeIds = [finalTesterId];
+          const testerObj = members.find((m) => m.id === finalTesterId);
+          const testerName = testerObj?.name || '测试人员';
+
+          activities.unshift({
+            id: `act_${Date.now()}`,
+            taskId: id,
+            authorId,
+            action: '🚀 开发完成，自动流转测试',
+            details: `开发工作已完成！任务自动进入【代码评审/测试】阶段，经办人已更新交由 ${testerName}`,
+            timestamp: nowStr,
+          });
+
+          // 发送系统通知给测试负责人
+          notifications.unshift({
+            id: `notif_${Date.now()}_${Math.random()}`,
+            recipientId: finalTesterId,
+            senderId: authorId,
+            type: 'status_change',
+            taskId: id,
+            message: `任务 "${t.title}" 开发已完成，自动流转给你进行测试/代码评审`,
+            isRead: false,
+            createdAt: nowStr,
+          });
+        } else {
+          activities.unshift({
+            id: `act_${Date.now()}`,
+            taskId: id,
+            authorId,
+            action: '🚀 开发完成，流转至测试/代码评审',
+            details: `开发工作已完成，任务已流转至【代码评审/测试】阶段`,
+            timestamp: nowStr,
+          });
+        }
+      } else {
+        // 常规状态更改日志
+        if (updates.status && updates.status !== t.status) {
+          const statusMap: Record<string, string> = {
+            backlog: 'Backlog 积压',
+            todo: '待办 (To Do)',
+            in_progress: '进行中 (In Progress)',
+            review: '代码评审 (Code Review)',
+            done: '已完成 (Done)',
+          };
+          activities.unshift({
+            id: `act_${Date.now()}`,
+            taskId: id,
+            authorId,
+            action: '更新了任务状态',
+            details: `由 "${statusMap[t.status]}" 更改为 "${statusMap[updates.status]}"`,
+            timestamp: nowStr,
+          });
+        }
       }
 
       // Log priority change
@@ -284,6 +411,9 @@ app.put('/api/tasks/:id', (req, res) => {
         });
       }
 
+      // 清除辅助请求标记避免多存
+      delete updates.completeDevAndFlow;
+
       updatedTask = {
         ...t,
         ...updates,
@@ -295,7 +425,7 @@ app.put('/api/tasks/:id', (req, res) => {
     return t;
   });
 
-  res.json({ success: true, task: updatedTask, tasks });
+  res.json({ success: true, task: updatedTask, tasks, notifications });
 });
 
 // Delete Task
@@ -378,7 +508,7 @@ app.post('/api/channels/:id/messages', async (req, res) => {
     let aiAnswer = '我是 TaskSync AI 协同助手。我已经分析了当前项目的任务状态，有什么需要我帮忙一键拆解或总结站会的吗？';
 
     try {
-      if (aiSettings.apiKey) {
+      if (apiKeysByProvider[activeProvider]) {
         const prompt = `你是一个专业的敏捷项目管理 Copilot AI 助手。团队成员在聊天频道说："${content}"。
 结合当前任务数量 (${tasks.length}个) 和成员在线状态，给出专业、亲切、富有生产力建设性的简短回复 (不超过150字)。如果用户提到特定任务，可直接说明。`;
 
@@ -414,7 +544,7 @@ app.post('/api/copilot/decompose', async (req, res) => {
   }
 
   try {
-    if (!aiSettings.apiKey) {
+    if (!apiKeysByProvider[activeProvider]) {
       // Mock decomposition fallback if key not configured
       return res.json({
         title: `【AI拆解】${goal}`,
@@ -481,7 +611,7 @@ app.post('/api/copilot/import-decompose', async (req, res) => {
   }
 
   // 未配置 Key 时返回空,前端可提示
-  if (!aiSettings.apiKey) {
+  if (!apiKeysByProvider[activeProvider]) {
     return res.json({ tasks: [], allTasks: tasks, mock: true });
   }
 
@@ -583,7 +713,7 @@ app.post('/api/copilot/summarize', async (req, res) => {
       assignees: t.assigneeIds.map((id) => members.find((m) => m.id === id)?.name || id),
     }));
 
-    if (!aiSettings.apiKey) {
+    if (!apiKeysByProvider[activeProvider]) {
       return res.json({
         summary: `📊 **Sprint 24 进展快照 (Mock)**
 • **已完成任务**: 1项 (TS-105 DevOps 流水线)

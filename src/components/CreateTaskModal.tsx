@@ -21,6 +21,8 @@ interface CreateTaskModalProps {
     estimatedHours: number;
     tags: string[];
     checklist: ChecklistItem[];
+    testerId?: string;
+    autoFlowToTest?: boolean;
   }) => void;
 }
 
@@ -44,9 +46,42 @@ export const CreateTaskModal: React.FC<CreateTaskModalProps> = ({
   const [tagInput, setTagInput] = useState('前端, 需求');
   const [checklist, setChecklist] = useState<ChecklistItem[]>([]);
 
+  // 流转控制:测试负责人 & 开发完成自动流转测试
+  const [testerId, setTesterId] = useState<string>(
+    members.find((m) => m.id === 'usr_sarah' || m.id === 'usr_elena')?.id || members[0]?.id || ''
+  );
+  const [autoFlowToTest, setAutoFlowToTest] = useState(true);
+
+  // 子任务与人员分配控制
+  const [newSubtaskTitle, setNewSubtaskTitle] = useState('');
+  const [newSubtaskAssignee, setNewSubtaskAssignee] = useState('');
+
   const [aiGoal, setAiGoal] = useState('');
   const [isDecomposing, setIsDecomposing] = useState(false);
   const [aiError, setAiError] = useState('');
+
+  const handleAddSubtask = (e?: React.FormEvent) => {
+    if (e) e.preventDefault();
+    if (!newSubtaskTitle.trim()) return;
+    const newItem: ChecklistItem = {
+      id: `chk_${Date.now()}_${Math.random()}`,
+      title: newSubtaskTitle.trim(),
+      completed: false,
+      assigneeId: newSubtaskAssignee || undefined,
+    };
+    setChecklist([...checklist, newItem]);
+    setNewSubtaskTitle('');
+  };
+
+  const handleUpdateSubtaskAssignee = (checkId: string, assigneeId: string) => {
+    setChecklist((prev) =>
+      prev.map((item) => (item.id === checkId ? { ...item, assigneeId: assigneeId || undefined } : item))
+    );
+  };
+
+  const handleDeleteSubtask = (checkId: string) => {
+    setChecklist((prev) => prev.filter((item) => item.id !== checkId));
+  };
 
   // AI Decompose Task Trigger
   const handleAiDecompose = async () => {
@@ -97,18 +132,27 @@ export const CreateTaskModal: React.FC<CreateTaskModalProps> = ({
       .map((t) => t.trim())
       .filter(Boolean);
 
+    // 自动收集所有子任务中指派的具体人员，合并入主任务的经办人列表中
+    const subtaskAssigneeIds = checklist
+      .map((item) => item.assigneeId)
+      .filter((id): id is string => Boolean(id));
+
+    const finalAssigneeIds = Array.from(new Set([...selectedAssigneeIds, ...subtaskAssigneeIds]));
+
     onSubmit({
       title: title.trim(),
       description,
       status,
       priority,
-      assigneeIds: selectedAssigneeIds,
+      assigneeIds: finalAssigneeIds,
       projectId,
       startDate,
       dueDate,
       estimatedHours,
       tags,
       checklist,
+      testerId,
+      autoFlowToTest,
     });
   };
 
@@ -292,7 +336,7 @@ export const CreateTaskModal: React.FC<CreateTaskModalProps> = ({
 
               {/* Assignees */}
               <div>
-                <label className="text-xs font-semibold text-slate-700 block mb-2">指派经办人</label>
+                <label className="text-xs font-semibold text-slate-700 block mb-2">指派开发经办人</label>
                 <div className="flex flex-wrap gap-2 max-h-40 overflow-y-auto p-1">
                   {(members || []).map((m) => {
                     const isSelected = selectedAssigneeIds.includes(m.id);
@@ -312,6 +356,48 @@ export const CreateTaskModal: React.FC<CreateTaskModalProps> = ({
                       </button>
                     );
                   })}
+                </div>
+              </div>
+
+              {/* Workflow & QA Transition Settings */}
+              <div className="bg-indigo-50/70 border border-indigo-150 rounded-2xl p-3.5 space-y-3">
+                <div className="flex items-center justify-between">
+                  <label className="text-xs font-bold text-indigo-950 flex items-center gap-1.5">
+                    <span>🔄 阶段流转规则设置</span>
+                  </label>
+                  <span className="text-[10px] font-semibold bg-indigo-100 text-indigo-800 px-2 py-0.5 rounded-full">
+                    自动化 Workflow
+                  </span>
+                </div>
+
+                <div className="space-y-2 text-xs">
+                  <div>
+                    <span className="text-slate-600 font-medium block mb-1">测试/审核负责人 (Tester)</span>
+                    <select
+                      value={testerId}
+                      onChange={(e) => setTesterId(e.target.value)}
+                      className="w-full bg-white border border-indigo-200 rounded-xl p-2 text-slate-800 focus:outline-none focus:border-indigo-500 cursor-pointer shadow-2xs font-medium"
+                    >
+                      <option value="">未设置 (保持原经办人)</option>
+                      {(members || []).map((m) => (
+                        <option key={m.id} value={m.id}>
+                          {m.name} ({m.role})
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+
+                  <label className="flex items-start gap-2 pt-1 cursor-pointer select-none">
+                    <input
+                      type="checkbox"
+                      checked={autoFlowToTest}
+                      onChange={(e) => setAutoFlowToTest(e.target.checked)}
+                      className="mt-0.5 rounded border-indigo-300 text-indigo-600 focus:ring-indigo-500 cursor-pointer"
+                    />
+                    <span className="text-[11px] text-slate-700 font-medium leading-tight">
+                      <strong>开发完成后自动流转测试：</strong>当研发提交/进入【代码评审/测试】状态时，经办人自动转给测试负责人并通知
+                    </span>
+                  </label>
                 </div>
               </div>
 

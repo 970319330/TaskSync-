@@ -110,16 +110,16 @@ export const RichTextEditor: React.FC<RichTextEditorProps> = ({
                 {children}
               </blockquote>
             ),
-            code: ({ inline, children }: { inline?: boolean; children?: React.ReactNode }) =>
-              inline ? (
-                <code className="bg-slate-200/80 text-emerald-800 font-mono text-[11px] px-1.5 py-0.5 rounded border border-slate-300/60">
-                  {children}
-                </code>
-              ) : (
-                <pre className="bg-slate-900 text-slate-100 p-3 rounded-xl text-[11px] font-mono overflow-x-auto my-2 border border-slate-800 shadow-xs">
-                  <code>{children}</code>
-                </pre>
-              ),
+            pre: ({ children }) => (
+              <pre className="bg-slate-900 text-slate-100 p-3 rounded-xl text-[11px] font-mono overflow-x-auto my-2 border border-slate-800 shadow-xs [&>code]:bg-transparent [&>code]:text-slate-100 [&>code]:p-0 [&>code]:border-none">
+                {children}
+              </pre>
+            ),
+            code: ({ children, className }: any) => (
+              <code className={`font-mono text-[11px] bg-slate-200/80 text-emerald-800 px-1.5 py-0.5 rounded border border-slate-300/60 ${className || ''}`}>
+                {children}
+              </code>
+            ),
             a: ({ href, children }) => (
               <a href={href} target="_blank" rel="noreferrer" className="text-emerald-600 underline font-medium hover:text-emerald-700">
                 {children}
@@ -365,16 +365,16 @@ export const RichTextEditor: React.FC<RichTextEditorProps> = ({
                     {children}
                   </blockquote>
                 ),
-                code: ({ inline, children }: { inline?: boolean; children?: React.ReactNode }) =>
-                  inline ? (
-                    <code className="bg-slate-200/80 text-emerald-800 font-mono text-[11px] px-1.5 py-0.5 rounded border border-slate-300/60">
-                      {children}
-                    </code>
-                  ) : (
-                    <pre className="bg-slate-900 text-slate-100 p-3 rounded-xl text-[11px] font-mono overflow-x-auto my-2 border border-slate-800 shadow-xs">
-                      <code>{children}</code>
-                    </pre>
-                  ),
+                pre: ({ children }) => (
+                  <pre className="bg-slate-900 text-slate-100 p-3 rounded-xl text-[11px] font-mono overflow-x-auto my-2 border border-slate-800 shadow-xs [&>code]:bg-transparent [&>code]:text-slate-100 [&>code]:p-0 [&>code]:border-none">
+                    {children}
+                  </pre>
+                ),
+                code: ({ children, className }: any) => (
+                  <code className={`font-mono text-[11px] bg-slate-200/80 text-emerald-800 px-1.5 py-0.5 rounded border border-slate-300/60 ${className || ''}`}>
+                    {children}
+                  </code>
+                ),
                 a: ({ href, children }) => (
                   <a href={href} target="_blank" rel="noreferrer" className="text-emerald-600 underline font-medium hover:text-emerald-700">
                     {children}
@@ -422,16 +422,16 @@ export const RichTextEditor: React.FC<RichTextEditorProps> = ({
                       {children}
                     </blockquote>
                   ),
-                  code: ({ inline, children }: { inline?: boolean; children?: React.ReactNode }) =>
-                    inline ? (
-                      <code className="bg-slate-200/80 text-emerald-800 font-mono text-[10px] px-1 py-0.5 rounded border border-slate-300/60">
-                        {children}
-                      </code>
-                    ) : (
-                      <pre className="bg-slate-900 text-slate-100 p-2.5 rounded-xl text-[10px] font-mono overflow-x-auto my-2 border border-slate-800 shadow-xs">
-                        <code>{children}</code>
-                      </pre>
-                    ),
+                  pre: ({ children }) => (
+                    <pre className="bg-slate-900 text-slate-100 p-2.5 rounded-xl text-[10px] font-mono overflow-x-auto my-2 border border-slate-800 shadow-xs [&>code]:bg-transparent [&>code]:text-slate-100 [&>code]:p-0 [&>code]:border-none">
+                      {children}
+                    </pre>
+                  ),
+                  code: ({ children, className }: any) => (
+                    <code className={`font-mono text-[10px] bg-slate-200/80 text-emerald-800 px-1 py-0.5 rounded border border-slate-300/60 ${className || ''}`}>
+                      {children}
+                    </code>
+                  ),
                   a: ({ href, children }) => (
                     <a href={href} target="_blank" rel="noreferrer" className="text-emerald-600 underline font-medium hover:text-emerald-700">
                       {children}

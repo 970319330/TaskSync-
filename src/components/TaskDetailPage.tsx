@@ -190,10 +190,14 @@ export const TaskDetailPage: React.FC<TaskDetailPageProps> = ({
   const showStart = task.status === 'todo' || task.status === 'backlog';
   const showPause = task.status === 'in_progress';
   const showComplete = task.status !== 'done';
+  const showFlowToTest = task.status !== 'review' && task.status !== 'done';
 
   const handleStart = () => onUpdateTask({ status: 'in_progress' });
   const handlePause = () => onUpdateTask({ status: 'todo' });
   const handleComplete = () => onUpdateTask({ status: 'done' });
+  const handleFlowToTest = () => {
+    onUpdateTask({ completeDevAndFlow: true, status: 'review' });
+  };
 
   return (
     <div className="min-h-screen bg-slate-50/60 pb-16 animate-fadeIn">
@@ -224,6 +228,17 @@ export const TaskDetailPage: React.FC<TaskDetailPageProps> = ({
 
           {/* Right: Quick Action Buttons */}
           <div className="flex items-center gap-2">
+            {/* 核心快捷操作:开发完成提交测试 */}
+            {showFlowToTest && (
+              <button
+                onClick={handleFlowToTest}
+                className="flex items-center gap-1.5 bg-indigo-600 hover:bg-indigo-500 text-white px-3.5 py-1.5 rounded-xl text-xs font-bold transition-all shadow-xs cursor-pointer"
+                title="开发完成，自动流转至测试/代码评审并转交测试负责人"
+              >
+                <span>🚀 开发完成，提交测试</span>
+              </button>
+            )}
+
             {/* 主操作:状态流转(开始 / 暂停 / 完成) */}
             {showStart && (
               <button
@@ -715,6 +730,70 @@ export const TaskDetailPage: React.FC<TaskDetailPageProps> = ({
                         );
                       })
                     : <span className="text-xs text-slate-400 italic">未指派经办人</span>}
+              </div>
+            </div>
+
+            {/* QA Workflow Transition Settings */}
+            <div className="space-y-2 pt-2 border-t border-slate-100">
+              <div className="flex items-center justify-between">
+                <label className="text-xs font-bold text-slate-700 block uppercase tracking-wider">
+                  测试/审核流转设置
+                </label>
+                {task.testerId && (
+                  <span className="text-[10px] font-bold text-indigo-700 bg-indigo-50 px-2 py-0.5 rounded-md border border-indigo-200">
+                    已关联测试人
+                  </span>
+                )}
+              </div>
+
+              <div className="bg-indigo-50/60 p-3 rounded-2xl border border-indigo-100 space-y-2.5 text-xs">
+                <div>
+                  <span className="text-slate-600 font-medium block mb-1">测试负责人 (Tester)</span>
+                  {isEditing ? (
+                    <select
+                      value={task.testerId || ''}
+                      onChange={(e) => onUpdateTask({ testerId: e.target.value })}
+                      className="w-full bg-white border border-indigo-200 rounded-xl p-2 text-slate-800 focus:outline-none focus:border-indigo-500 cursor-pointer shadow-2xs font-medium"
+                    >
+                      <option value="">未指定 (保留原经办人)</option>
+                      {(members || []).map((m) => (
+                        <option key={m.id} value={m.id}>
+                          {m.name} ({m.role})
+                        </option>
+                      ))}
+                    </select>
+                  ) : (
+                    (() => {
+                      const tMember = members.find((m) => m.id === task.testerId);
+                      return tMember ? (
+                        <div className="flex items-center gap-2 bg-white px-3 py-1.5 rounded-xl border border-indigo-200 shadow-2xs">
+                          <img src={tMember.avatar} alt={tMember.name} className="w-4 h-4 rounded-full object-cover" />
+                          <span className="font-semibold text-indigo-950">{tMember.name}</span>
+                          <span className="text-[10px] text-indigo-600 bg-indigo-50 px-1.5 py-0.5 rounded ml-auto">
+                            {tMember.role}
+                          </span>
+                        </div>
+                      ) : (
+                        <span className="text-slate-400 italic">未指定测试负责人 (点击右上角编辑配置)</span>
+                      );
+                    })()
+                  )}
+                </div>
+
+                <div className="pt-1">
+                  <label className="flex items-center gap-2 cursor-pointer select-none">
+                    <input
+                      type="checkbox"
+                      disabled={!isEditing}
+                      checked={task.autoFlowToTest !== false}
+                      onChange={(e) => onUpdateTask({ autoFlowToTest: e.target.checked })}
+                      className="rounded border-indigo-300 text-indigo-600 focus:ring-indigo-500 cursor-pointer"
+                    />
+                    <span className="text-[11px] text-slate-700 font-medium">
+                      开发完成后自动流转至测试人
+                    </span>
+                  </label>
+                </div>
               </div>
             </div>
 

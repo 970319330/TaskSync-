@@ -307,6 +307,9 @@ export default function App() {
     apiKey: string;
     model: string;
     baseUrl: string;
+    keys?: Record<AiProvider, string>;
+    models?: Record<AiProvider, string>;
+    baseUrls?: Record<AiProvider, string>;
   }) => {
     try {
       const res = await fetch('/api/settings', {
