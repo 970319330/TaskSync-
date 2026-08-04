@@ -112,12 +112,12 @@ export const AnalyticsDashboard: React.FC<AnalyticsDashboardProps> = ({
 
         <div className="bg-white border border-slate-200 rounded-2xl p-4 shadow-xs">
           <div className="flex items-center justify-between text-slate-500 text-xs mb-2">
-            <span>推进中与代码评审</span>
+            <span>推进中与测试</span>
             <Clock className="w-4 h-4 text-amber-500" />
           </div>
           <div className="text-2xl font-black text-amber-600">{inProgressTasks + reviewTasks} <span className="text-xs font-normal text-slate-500">个</span></div>
           <div className="text-[11px] text-slate-500 mt-2">
-            进行中: {inProgressTasks} | 评审中: {reviewTasks}
+            进行中: {inProgressTasks} | 测试中: {reviewTasks}
           </div>
         </div>
 
@@ -202,7 +202,7 @@ export const AnalyticsDashboard: React.FC<AnalyticsDashboardProps> = ({
               { id: 'backlog', label: 'Backlog 积压', count: tasks.filter((t) => t.status === 'backlog').length, color: 'bg-slate-400' },
               { id: 'todo', label: '待办 (To Do)', count: tasks.filter((t) => t.status === 'todo').length, color: 'bg-blue-500' },
               { id: 'in_progress', label: '进行中 (In Progress)', count: tasks.filter((t) => t.status === 'in_progress').length, color: 'bg-amber-500' },
-              { id: 'review', label: '代码评审 (Code Review)', count: tasks.filter((t) => t.status === 'review').length, color: 'bg-purple-500' },
+              { id: 'review', label: '测试 (Test)', count: tasks.filter((t) => t.status === 'review').length, color: 'bg-purple-500' },
               { id: 'done', label: '已完成 (Done)', count: tasks.filter((t) => t.status === 'done').length, color: 'bg-emerald-500' },
             ].map((st) => {
               const pct = totalTasks > 0 ? Math.round((st.count / totalTasks) * 100) : 0;

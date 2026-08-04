@@ -1,11 +1,14 @@
 import React, { useState } from 'react';
-import { Member, Project, TaskPriority, TaskStatus, ChecklistItem } from '../types';
-import { X, Sparkles, Plus, Loader2, CheckSquare } from 'lucide-react';
+import { Member, Project, TaskPriority, TaskStatus, ChecklistItem, Role, TaskColorKey, TASK_COLORS } from '../types';
+import { hasPermission } from '../permissions';
+import { X, Sparkles, Plus, Loader2, CheckSquare, Palette } from 'lucide-react';
 import { RichTextEditor } from './RichTextEditor';
 
 interface CreateTaskModalProps {
   initialStatus?: TaskStatus;
   members: Member[];
+  roles: Role[];
+  currentMember: Member;
   projects: Project[];
   activeProject: Project;
   onClose: () => void;
@@ -23,12 +26,15 @@ interface CreateTaskModalProps {
     checklist: ChecklistItem[];
     testerId?: string;
     autoFlowToTest?: boolean;
+    color?: TaskColorKey;
   }) => void;
 }
 
 export const CreateTaskModal: React.FC<CreateTaskModalProps> = ({
   initialStatus = 'todo',
   members,
+  roles,
+  currentMember,
   projects,
   activeProject,
   onClose,
@@ -59,6 +65,12 @@ export const CreateTaskModal: React.FC<CreateTaskModalProps> = ({
   const [aiGoal, setAiGoal] = useState('');
   const [isDecomposing, setIsDecomposing] = useState(false);
   const [aiError, setAiError] = useState('');
+
+  // 任务颜色标记
+  const [color, setColor] = useState<TaskColorKey>('none');
+
+  // 权限判断:是否有指派任务权限
+  const canAssignTask = hasPermission(currentMember, 'assign_task', roles);
 
   const handleAddSubtask = (e?: React.FormEvent) => {
     if (e) e.preventDefault();
@@ -153,6 +165,7 @@ export const CreateTaskModal: React.FC<CreateTaskModalProps> = ({
       checklist,
       testerId,
       autoFlowToTest,
+      color,
     });
   };
 
@@ -313,7 +326,7 @@ export const CreateTaskModal: React.FC<CreateTaskModalProps> = ({
                     <option value="backlog">Backlog 积压</option>
                     <option value="todo">待办 (To Do)</option>
                     <option value="in_progress">进行中 (In Progress)</option>
-                    <option value="review">代码评审 (Code Review)</option>
+                    <option value="review">测试 (Test)</option>
                     <option value="done">已完成 (Done)</option>
                   </select>
                 </div>
@@ -334,9 +347,44 @@ export const CreateTaskModal: React.FC<CreateTaskModalProps> = ({
                 </select>
               </div>
 
+              {/* 任务颜色标记 */}
+              <div>
+                <label className="text-xs font-semibold text-slate-700 block mb-1.5 flex items-center gap-1.5">
+                  <Palette className="w-3.5 h-3.5 text-emerald-600" />
+                  <span>任务颜色标记</span>
+                  <span className="text-[10px] text-slate-400 font-normal">（用于看板 / 列表卡片视觉标签）</span>
+                </label>
+                <div className="flex flex-wrap gap-1.5 bg-white border border-slate-200 rounded-xl p-2 shadow-2xs">
+                  {TASK_COLORS.map((opt) => {
+                    const isSelected = color === opt.key;
+                    return (
+                      <button
+                        key={opt.key}
+                        type="button"
+                        onClick={() => setColor(opt.key)}
+                        title={opt.label}
+                        className={`relative w-6 h-6 rounded-full ${opt.bar} border-2 transition-all cursor-pointer hover:scale-110 ${
+                          isSelected ? 'ring-2 ring-offset-1 ring-emerald-500 border-white' : 'border-white shadow-2xs'
+                        }`}
+                      >
+                        {opt.key === 'none' && (
+                          <span className="absolute inset-0 flex items-center justify-center text-[10px] text-slate-500 font-bold">/</span>
+                        )}
+                      </button>
+                    );
+                  })}
+                  <span className="ml-auto self-center text-[11px] text-slate-500 font-medium pr-1">
+                    {TASK_COLORS.find((c) => c.key === color)?.label}
+                  </span>
+                </div>
+              </div>
+
               {/* Assignees */}
               <div>
-                <label className="text-xs font-semibold text-slate-700 block mb-2">指派开发经办人</label>
+                <label className="text-xs font-semibold text-slate-700 block mb-2">
+                  指派开发经办人
+                  {!canAssignTask && <span className="ml-2 text-[10px] text-amber-600 font-normal">（当前角色无指派权限）</span>}
+                </label>
                 <div className="flex flex-wrap gap-2 max-h-40 overflow-y-auto p-1">
                   {(members || []).map((m) => {
                     const isSelected = selectedAssigneeIds.includes(m.id);
@@ -344,8 +392,11 @@ export const CreateTaskModal: React.FC<CreateTaskModalProps> = ({
                       <button
                         type="button"
                         key={m.id}
-                        onClick={() => toggleAssignee(m.id)}
-                        className={`px-3 py-1.5 rounded-xl text-xs flex items-center gap-2 border transition-all cursor-pointer ${
+                        onClick={() => canAssignTask && toggleAssignee(m.id)}
+                        disabled={!canAssignTask}
+                        className={`px-3 py-1.5 rounded-xl text-xs flex items-center gap-2 border transition-all ${
+                          canAssignTask ? 'cursor-pointer' : 'cursor-not-allowed opacity-50'
+                        } ${
                           isSelected
                             ? 'bg-emerald-50 border-emerald-300 text-emerald-900 font-bold shadow-2xs'
                             : 'bg-white border-slate-200 text-slate-600 hover:bg-slate-100'
@@ -376,7 +427,8 @@ export const CreateTaskModal: React.FC<CreateTaskModalProps> = ({
                     <select
                       value={testerId}
                       onChange={(e) => setTesterId(e.target.value)}
-                      className="w-full bg-white border border-indigo-200 rounded-xl p-2 text-slate-800 focus:outline-none focus:border-indigo-500 cursor-pointer shadow-2xs font-medium"
+                      disabled={!canAssignTask}
+                      className={`w-full bg-white border border-indigo-200 rounded-xl p-2 text-slate-800 focus:outline-none focus:border-indigo-500 shadow-2xs font-medium ${canAssignTask ? 'cursor-pointer' : 'cursor-not-allowed opacity-60'}`}
                     >
                       <option value="">未设置 (保持原经办人)</option>
                       {(members || []).map((m) => (
@@ -395,7 +447,7 @@ export const CreateTaskModal: React.FC<CreateTaskModalProps> = ({
                       className="mt-0.5 rounded border-indigo-300 text-indigo-600 focus:ring-indigo-500 cursor-pointer"
                     />
                     <span className="text-[11px] text-slate-700 font-medium leading-tight">
-                      <strong>开发完成后自动流转测试：</strong>当研发提交/进入【代码评审/测试】状态时，经办人自动转给测试负责人并通知
+                      <strong>开发完成后自动流转测试：</strong>当研发提交/进入【测试】状态时，经办人自动转给测试负责人并通知
                     </span>
                   </label>
                 </div>

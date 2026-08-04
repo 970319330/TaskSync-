@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
 import { Member, Project } from '../types';
+import { getProjectPath, setProjectPath, removeProjectPath, startDevInTrae } from '../utils/trae';
 import {
   X,
   Layers,
@@ -9,6 +10,9 @@ import {
   Users,
   FolderKanban,
   AlertCircle,
+  Folder,
+  ExternalLink,
+  Eraser,
 } from 'lucide-react';
 
 interface ProjectManageModalProps {
@@ -49,6 +53,7 @@ export const ProjectManageModal: React.FC<ProjectManageModalProps> = ({
   const [editDescription, setEditDescription] = useState('');
   const [editColor, setEditColor] = useState('emerald');
   const [editMemberIds, setEditMemberIds] = useState<string[]>([]);
+  const [editLocalPath, setEditLocalPath] = useState('');
   const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null);
 
   const startEdit = (p: Project) => {
@@ -58,6 +63,7 @@ export const ProjectManageModal: React.FC<ProjectManageModalProps> = ({
     setEditDescription(p.description);
     setEditColor(p.color);
     setEditMemberIds(p.memberIds);
+    setEditLocalPath(getProjectPath(p.id) || '');
   };
 
   const cancelEdit = () => {
@@ -73,6 +79,12 @@ export const ProjectManageModal: React.FC<ProjectManageModalProps> = ({
       color: editColor,
       memberIds: editMemberIds,
     });
+    const trimmed = editLocalPath.trim();
+    if (trimmed) {
+      setProjectPath(id, trimmed);
+    } else {
+      removeProjectPath(id);
+    }
     setEditingId(null);
   };
 
@@ -162,6 +174,34 @@ export const ProjectManageModal: React.FC<ProjectManageModalProps> = ({
                           <span className="text-slate-300">·</span>
                           <span className="truncate">{p.memberIds.map(memberName).join('、') || '未指派'}</span>
                         </div>
+                        {(() => {
+                          const localPath = getProjectPath(p.id);
+                          return (
+                            <div className="flex items-center gap-1.5 mt-1.5 text-[11px]">
+                              <Folder className="w-3 h-3 text-slate-400 shrink-0" />
+                              {localPath ? (
+                                <>
+                                  <span
+                                    className="font-mono text-slate-500 truncate max-w-[320px]"
+                                    title={localPath}
+                                  >
+                                    {localPath}
+                                  </span>
+                                  <button
+                                    onClick={() => startDevInTrae(localPath)}
+                                    className="text-indigo-600 hover:text-indigo-800 hover:bg-indigo-50 px-1.5 py-0.5 rounded transition-colors cursor-pointer flex items-center gap-1"
+                                    title="在 TRAE Work 中打开"
+                                  >
+                                    <ExternalLink className="w-3 h-3" />
+                                    <span>在 TRAE 中打开</span>
+                                  </button>
+                                </>
+                              ) : (
+                                <span className="text-slate-400 italic">未配置本地开发路径(点击右侧编辑按钮设置)</span>
+                              )}
+                            </div>
+                          );
+                        })()}
                       </div>
                     </div>
 
@@ -293,6 +333,35 @@ export const ProjectManageModal: React.FC<ProjectManageModalProps> = ({
                             </button>
                           );
                         })}
+                      </div>
+                    </div>
+
+                    <div>
+                      <label className="text-[11px] font-bold text-slate-600 block mb-1 uppercase">
+                        本地开发路径
+                        <span className="ml-1.5 text-[10px] font-normal text-slate-400 normal-case">
+                          配置后,任务"开始"时会唤起 TRAE Work 打开此路径
+                        </span>
+                      </label>
+                      <div className="flex items-center gap-1.5">
+                        <Folder className="w-3.5 h-3.5 text-slate-400 shrink-0" />
+                        <input
+                          type="text"
+                          value={editLocalPath}
+                          onChange={(e) => setEditLocalPath(e.target.value)}
+                          placeholder="例如 /Users/zhangqi/projects/my-app"
+                          className="flex-1 bg-white border border-slate-200 rounded-lg px-2.5 py-1.5 text-xs text-slate-800 focus:outline-none focus:border-emerald-500 shadow-2xs font-mono"
+                        />
+                        {editLocalPath && (
+                          <button
+                            type="button"
+                            onClick={() => setEditLocalPath('')}
+                            className="p-1.5 rounded-lg text-slate-400 hover:text-rose-600 hover:bg-rose-50 transition-colors cursor-pointer"
+                            title="清除路径"
+                          >
+                            <Eraser className="w-3.5 h-3.5" />
+                          </button>
+                        )}
                       </div>
                     </div>
 

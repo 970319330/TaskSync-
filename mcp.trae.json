@@ -1,0 +1,12 @@
+{
+  "mcpServers": {
+    "tasksync": {
+      "command": "npx",
+      "args": ["tsx", "mcp/server.ts"],
+      "cwd": "/Users/zhangqi/Documents/code/TaskSync-",
+      "env": {
+        "TASKSYNC_API_BASE": "http://localhost:3000"
+      }
+    }
+  }
+}

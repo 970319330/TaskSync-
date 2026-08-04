@@ -11,6 +11,7 @@ import {
   TaskPriority,
   AiSettings,
   AiProvider,
+  Role,
 } from './types';
 import { Navbar } from './components/Navbar';
 import { MemberPresenceBar } from './components/MemberPresenceBar';
@@ -25,12 +26,17 @@ import { CreateTaskModal } from './components/CreateTaskModal';
 import { CreateProjectModal } from './components/CreateProjectModal';
 import { ProjectManageModal } from './components/ProjectManageModal';
 import { SettingsModal } from './components/SettingsModal';
+import { TeamManagementPage } from './components/TeamManagementPage';
 import { AiCopilotDrawer } from './components/AiCopilotDrawer';
+import { Login } from './components/Login';
+import { ZentaoSyncModal } from './components/ZentaoSyncModal';
+import { hasPermission } from './permissions';
 import { Loader2 } from 'lucide-react';
 
 export default function App() {
   const [loading, setLoading] = useState(true);
   const [members, setMembers] = useState<Member[]>([]);
+  const [roles, setRoles] = useState<Role[]>([]);
   const [projects, setProjects] = useState<Project[]>([]);
   const [tasks, setTasks] = useState<Task[]>([]);
   const [channels, setChannels] = useState<ChatChannel[]>([]);
@@ -44,6 +50,40 @@ export default function App() {
   const [searchQuery, setSearchQuery] = useState('');
   const [activeChannel, setActiveChannel] = useState<ChatChannel | null>(null);
 
+  // 登录态：登录后才能进入工作空间
+  const [loggedInMemberId, setLoggedInMemberId] = useState<string | null>(
+    () => localStorage.getItem('tasksync_logged_in_member_id')
+  );
+
+  // 禅道登录会话：true 时只显示禅道同步的项目/任务/成员/频道
+  const [isZentaoSession, setIsZentaoSession] = useState<boolean>(
+    () => sessionStorage.getItem('tasksync_login_source') === 'zentao'
+  );
+
+  const handleLogin = async (memberId: string) => {
+    localStorage.setItem('tasksync_logged_in_member_id', memberId);
+    setLoggedInMemberId(memberId);
+    // 立即设置 currentMember，避免等待 fetchState 重跑
+    const m = members.find((mem) => mem.id === memberId);
+    if (m) setCurrentMember(m);
+    // 同步禅道登录会话标记
+    setIsZentaoSession(sessionStorage.getItem('tasksync_login_source') === 'zentao');
+    // 登录后强制刷新 state，确保显示最新的项目/任务数据
+    // （禅道登录会在 server 端新增项目和任务，需要重新拉取）
+    await fetchState(true);
+  };
+
+  const handleLogout = () => {
+    localStorage.removeItem('tasksync_logged_in_member_id');
+    sessionStorage.removeItem('tasksync_login_source');
+    sessionStorage.removeItem('tasksync_zentao_member_id');
+    setLoggedInMemberId(null);
+    setIsZentaoSession(false);
+    setActiveProject(null);
+    setCurrentMember(null);
+    setSelectedTask(null);
+  };
+
   // Modals & Panels
   const [selectedTask, setSelectedTask] = useState<Task | null>(null);
   const [showCreateTaskModal, setShowCreateTaskModal] = useState(false);
@@ -51,32 +91,43 @@ export default function App() {
   const [showCreateProjectModal, setShowCreateProjectModal] = useState(false);
   const [showManageProjectModal, setShowManageProjectModal] = useState(false);
   const [showSettingsModal, setShowSettingsModal] = useState(false);
+  const [showTeamModal, setShowTeamModal] = useState(false);
   const [aiSettings, setAiSettings] = useState<AiSettings | null>(null);
   const [showAiCopilotDrawer, setShowAiCopilotDrawer] = useState(false);
   const [showNotificationsDropdown, setShowNotificationsDropdown] = useState(false);
   const [aiSummary, setAiSummary] = useState('');
   const [isGeneratingSummary, setIsGeneratingSummary] = useState(false);
+  const [showZentaoSyncModal, setShowZentaoSyncModal] = useState(false);
 
   // Initial Fetch State
-  const fetchState = async () => {
+  const fetchState = async (force = false) => {
     try {
       const res = await fetch('/api/state');
       const data = await res.json();
       if (data) {
         setMembers(data.members || []);
+        setRoles(data.roles || []);
         setProjects(data.projects || []);
         setTasks(data.tasks || []);
         setChannels(data.channels || []);
         setMessages(data.messages || []);
         setNotifications(data.notifications || []);
 
-        if (!activeProject && data.projects?.length > 0) {
+        if ((force || !activeProject) && data.projects?.length > 0) {
           setActiveProject(data.projects[0]);
         }
-        if (!currentMember && data.members?.length > 0) {
-          setCurrentMember(data.members[0]);
+        // 若已登录，则以登录身份作为 currentMember；否则保持 null（由登录页处理）
+        if (loggedInMemberId) {
+          const loggedIn = (data.members || []).find((m) => m.id === loggedInMemberId);
+          if (loggedIn) {
+            setCurrentMember(loggedIn);
+          } else {
+            // 登录身份已失效（成员被移除等），清理登录态
+            localStorage.removeItem('tasksync_logged_in_member_id');
+            setLoggedInMemberId(null);
+          }
         }
-        if (!activeChannel && data.channels?.length > 0) {
+        if ((force || !activeChannel) && data.channels?.length > 0) {
           setActiveChannel(data.channels[0]);
         }
       }
@@ -100,13 +151,40 @@ export default function App() {
     fetchState();
   }, []);
 
-  // Sync selected task with latest state
+  // 数据权限：管理员 / 产品经理可看全部；其他成员仅能看到自己经办或报告的任务
+  // 提前计算，供 handleOpenTaskById / selectedTask 同步 / 通知过滤 / 各视图统一使用
+  const canViewAllTasks = currentMember ? hasPermission(currentMember, 'assign_task', roles) : false;
+  // 禅道登录会话：只显示禅道同步的项目/任务（id 以 ZT- 开头，projectId 以 zentao- 开头）
+  const isZentaoTask = (t: Task) => t.id.startsWith('ZT-') || t.projectId.startsWith('zentao-');
+  const isZentaoProject = (p: Project) => p.id.startsWith('zentao-') || tasks.some((t) => t.id.startsWith('ZT-') && t.projectId === p.id);
+  const visibleTasks = currentMember
+    ? tasks.filter((t) => {
+        // 禅道会话：只保留禅道任务
+        if (isZentaoSession && !isZentaoTask(t)) return false;
+        // 非禅道会话：按角色权限过滤
+        if (!isZentaoSession && !canViewAllTasks) {
+          return t.assigneeIds?.includes(currentMember.id) || t.reporterId === currentMember.id;
+        }
+        return true;
+      })
+    : [];
+
+  // Sync selected task with latest state（仅在可见任务范围内同步）
   useEffect(() => {
     if (selectedTask) {
-      const updated = tasks.find((t) => t.id === selectedTask.id);
+      const updated = visibleTasks.find((t) => t.id === selectedTask.id);
       if (updated) setSelectedTask(updated);
     }
   }, [tasks]);
+
+  // 禅道会话下，若当前 activeProject 不在可见项目列表中，自动切换到第一个可见项目
+  useEffect(() => {
+    if (!isZentaoSession || !activeProject) return;
+    const inVisible = projects.filter((p) => p.id.startsWith('zentao-') || tasks.some((t) => t.id.startsWith('ZT-') && t.projectId === p.id));
+    if (!inVisible.find((p) => p.id === activeProject.id) && inVisible.length > 0) {
+      setActiveProject(inVisible[0]);
+    }
+  }, [isZentaoSession, projects, tasks]);
 
   // Update Task Status
   const handleUpdateTaskStatus = async (taskId: string, newStatus: TaskStatus) => {
@@ -419,11 +497,38 @@ export default function App() {
   };
 
   const handleOpenTaskById = (taskId: string) => {
-    const t = tasks.find((item) => item.id === taskId);
+    const t = visibleTasks.find((item) => item.id === taskId);
     if (t) setSelectedTask(t);
   };
 
-  if (loading || !activeProject || !currentMember || !activeChannel) {
+  // 禅道数据导入
+  const handleZentaoImport = async (ztTasks: any[]) => {
+    try {
+      const res = await fetch('/api/zentao/import', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          tasks: ztTasks,
+          memberId: currentMember?.id,
+        }),
+      });
+      const data = await res.json();
+      if (data.success) {
+        // 刷新 state
+        if (data.projects) setProjects(data.projects);
+        // 重新拉取全部 state 以获取最新 tasks
+        const stateRes = await fetch('/api/state');
+        const stateData = await stateRes.json();
+        if (stateData.tasks) setTasks(stateData.tasks);
+        if (stateData.projects) setProjects(stateData.projects);
+        setShowZentaoSyncModal(false);
+      }
+    } catch (err) {
+      console.error('Zentao import failed:', err);
+    }
+  };
+
+  if (loading) {
     return (
       <div className="min-h-screen bg-slate-50 text-slate-900 flex items-center justify-center p-6">
         <div className="flex flex-col items-center gap-3 text-emerald-600">
@@ -434,20 +539,73 @@ export default function App() {
     );
   }
 
-  // Filter tasks for current active project
-  const projectTasks = tasks.filter((t) => t.projectId === activeProject.id);
+  // 未登录：渲染登录页
+  if (!loggedInMemberId || !currentMember) {
+    return <Login members={members} roles={roles} onLogin={handleLogin} />;
+  }
+
+  // 已登录但项目数据未就绪
+  if (!activeProject || !activeChannel) {
+    return (
+      <div className="min-h-screen bg-slate-50 text-slate-900 flex items-center justify-center p-6">
+        <div className="flex flex-col items-center gap-3 text-emerald-600">
+          <Loader2 className="w-8 h-8 animate-spin" />
+          <span className="text-sm font-semibold tracking-wide">准备协作空间...</span>
+        </div>
+      </div>
+    );
+  }
+
+  // Filter tasks for current active project（基于已过滤的 visibleTasks）
+  const visibleProjectTasks = visibleTasks.filter((t) => t.projectId === activeProject.id);
+
+  // 通知按当前用户过滤（普通用户只看到发给自己的通知）
+  const visibleNotifications = canViewAllTasks
+    ? notifications
+    : notifications.filter((n) => n.recipientId === currentMember.id);
+
+  // 禅道登录会话：项目/成员/频道也只显示禅道相关数据
+  const visibleProjects = isZentaoSession
+    ? projects.filter((p) => p.id.startsWith('zentao-') || tasks.some((t) => t.id.startsWith('ZT-') && t.projectId === p.id))
+    : projects;
+  const zentaoMemberId = isZentaoSession ? sessionStorage.getItem('tasksync_zentao_member_id') : null;
+  const visibleMembers = isZentaoSession
+    ? members.filter((m) => m.id === zentaoMemberId || m.id === currentMember?.id)
+    : members;
+  // 频道按可见项目关联的活动频道过滤
+  const visibleChannels = isZentaoSession
+    ? channels
+    : channels;
 
   return (
     <div className="min-h-screen bg-slate-50 text-slate-900 font-sans selection:bg-emerald-500 selection:text-white relative">
-      
+
+      {/* 禅道会话横幅提示 */}
+      {isZentaoSession && (
+        <div className="bg-indigo-50 border-b border-indigo-200 text-indigo-800 text-xs font-medium">
+          <div className="max-w-[1600px] mx-auto px-4 sm:px-6 lg:px-8 py-1.5 flex items-center justify-between">
+            <span>当前为禅道登录会话，仅显示从禅道同步的项目与任务</span>
+            <button
+              onClick={handleLogout}
+              className="text-indigo-700 hover:text-indigo-900 font-bold cursor-pointer"
+            >
+              退出禅道会话
+            </button>
+          </div>
+        </div>
+      )}
+
       {/* Top Main Navbar */}
       <Navbar
-        projects={projects}
+        projects={visibleProjects}
         activeProject={activeProject}
         onSelectProject={(p) => setActiveProject(p)}
-        members={members}
+        members={visibleMembers}
+        roles={roles}
         currentMember={currentMember}
+        canSwitchMember={canViewAllTasks}
         onSelectCurrentMember={(m) => setCurrentMember(m)}
+        onLogout={handleLogout}
         viewMode={viewMode}
         onSelectViewMode={(v) => setViewMode(v)}
         searchQuery={searchQuery}
@@ -460,7 +618,9 @@ export default function App() {
         onOpenCreateProject={() => setShowCreateProjectModal(true)}
         onOpenManageProject={() => setShowManageProjectModal(true)}
         onOpenSettings={() => setShowSettingsModal(true)}
-        notifications={notifications}
+        onOpenTeamModal={() => setShowTeamModal(true)}
+        onOpenZentaoSync={() => setShowZentaoSyncModal(true)}
+        notifications={visibleNotifications}
         showNotificationsDropdown={showNotificationsDropdown}
         onOpenNotifications={() => setShowNotificationsDropdown(!showNotificationsDropdown)}
         onCloseNotifications={() => setShowNotificationsDropdown(false)}
@@ -470,7 +630,7 @@ export default function App() {
 
       {/* Realtime Team Members Presence & Status Bar */}
       <MemberPresenceBar
-        members={members}
+        members={visibleMembers}
         currentMember={currentMember}
         onUpdateMemberStatusText={handleUpdateMemberStatusText}
       />
@@ -480,7 +640,8 @@ export default function App() {
         {selectedTask ? (
           <TaskDetailPage
             task={selectedTask}
-            members={members}
+            members={visibleMembers}
+            roles={roles}
             currentMember={currentMember}
             projectName={activeProject.name}
             onBack={() => setSelectedTask(null)}
@@ -488,12 +649,23 @@ export default function App() {
             onAddComment={handleAddComment}
             onDeleteTask={handleDeleteTask}
           />
+        ) : showTeamModal ? (
+          <TeamManagementPage
+            members={visibleMembers}
+            roles={roles}
+            currentMember={currentMember}
+            onClose={() => setShowTeamModal(false)}
+            onUpdateMembers={setMembers}
+            onUpdateRoles={setRoles}
+          />
         ) : (
           <>
             {viewMode === 'kanban' && (
               <KanbanBoard
-                tasks={projectTasks}
-                members={members}
+                tasks={visibleProjectTasks}
+                members={visibleMembers}
+                roles={roles}
+                currentMember={currentMember}
                 searchQuery={searchQuery}
                 onTaskClick={(t) => setSelectedTask(t)}
                 onUpdateTaskStatus={handleUpdateTaskStatus}
@@ -506,8 +678,10 @@ export default function App() {
 
             {viewMode === 'list' && (
               <ListView
-                tasks={projectTasks}
-                members={members}
+                tasks={visibleProjectTasks}
+                members={visibleMembers}
+                roles={roles}
+                currentMember={currentMember}
                 searchQuery={searchQuery}
                 onTaskClick={(t) => setSelectedTask(t)}
                 onUpdateTaskStatus={handleUpdateTaskStatus}
@@ -522,16 +696,16 @@ export default function App() {
 
             {viewMode === 'gantt' && (
               <GanttChart
-                tasks={projectTasks}
-                members={members}
+                tasks={visibleProjectTasks}
+                members={visibleMembers}
                 onTaskClick={(t) => setSelectedTask(t)}
               />
             )}
 
             {viewMode === 'analytics' && (
               <AnalyticsDashboard
-                tasks={projectTasks}
-                members={members}
+                tasks={visibleProjectTasks}
+                members={visibleMembers}
                 onGenerateAiSummary={handleGenerateAiSummary}
                 aiSummary={aiSummary}
                 isGeneratingSummary={isGeneratingSummary}
@@ -540,13 +714,13 @@ export default function App() {
 
             {viewMode === 'chat' && (
               <ChatHub
-                channels={channels}
+                channels={visibleChannels}
                 activeChannel={activeChannel}
                 onSelectChannel={(c) => setActiveChannel(c)}
                 messages={messages}
-                members={members}
+                members={visibleMembers}
                 currentMember={currentMember}
-                tasks={projectTasks}
+                tasks={visibleProjectTasks}
                 onSendMessage={handleSendMessage}
                 onTaskClickById={handleOpenTaskById}
               />
@@ -559,8 +733,10 @@ export default function App() {
       {showCreateTaskModal && (
         <CreateTaskModal
           initialStatus={createTaskInitialStatus}
-          members={members}
-          projects={projects}
+          members={visibleMembers}
+          roles={roles}
+          currentMember={currentMember}
+          projects={visibleProjects}
           activeProject={activeProject}
           onClose={() => setShowCreateTaskModal(false)}
           onSubmit={handleCreateTask}
@@ -570,7 +746,7 @@ export default function App() {
       {/* Create Project Modal */}
       {showCreateProjectModal && (
         <CreateProjectModal
-          members={members}
+          members={visibleMembers}
           onClose={() => setShowCreateProjectModal(false)}
           onSubmit={handleCreateProject}
         />
@@ -579,8 +755,8 @@ export default function App() {
       {/* Project Management Modal */}
       {showManageProjectModal && (
         <ProjectManageModal
-          projects={projects}
-          members={members}
+          projects={visibleProjects}
+          members={visibleMembers}
           activeProject={activeProject}
           onClose={() => setShowManageProjectModal(false)}
           onUpdateProject={handleUpdateProject}
@@ -602,12 +778,20 @@ export default function App() {
       <AiCopilotDrawer
         isOpen={showAiCopilotDrawer}
         onClose={() => setShowAiCopilotDrawer(false)}
-        tasks={projectTasks}
-        members={members}
+        tasks={visibleProjectTasks}
+        members={visibleMembers}
         onGenerateSummary={handleGenerateAiSummary}
         aiSummary={aiSummary}
         isGeneratingSummary={isGeneratingSummary}
       />
+
+      {/* 禅道数据同步 */}
+      {showZentaoSyncModal && (
+        <ZentaoSyncModal
+          onClose={() => setShowZentaoSyncModal(false)}
+          onImport={handleZentaoImport}
+        />
+      )}
 
     </div>
   );

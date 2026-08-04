@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
-import { Task, TaskStatus, TaskPriority, Member } from '../types';
+import { Task, TaskStatus, TaskPriority, Member, Role, getTaskColor } from '../types';
+import { hasPermission } from '../permissions';
 import {
   ArrowUpDown,
   CheckSquare,
@@ -10,11 +11,14 @@ import {
   ListFilter,
   Trash2,
   Layers,
+  Lock,
 } from 'lucide-react';
 
 interface ListViewProps {
   tasks: Task[];
   members: Member[];
+  roles: Role[];
+  currentMember: Member;
   searchQuery: string;
   onTaskClick: (task: Task) => void;
   onUpdateTaskStatus: (taskId: string, newStatus: TaskStatus) => void;
@@ -26,6 +30,8 @@ interface ListViewProps {
 export const ListView: React.FC<ListViewProps> = ({
   tasks,
   members,
+  roles,
+  currentMember,
   searchQuery,
   onTaskClick,
   onUpdateTaskStatus,
@@ -38,6 +44,9 @@ export const ListView: React.FC<ListViewProps> = ({
   const [priorityFilter, setPriorityFilter] = useState<string>('all');
   const [sortField, setSortField] = useState<'id' | 'dueDate' | 'priority' | 'hours'>('dueDate');
   const [sortAsc, setSortAsc] = useState(true);
+
+  // 列表视图不允许修改状态；优先级仅管理员 / 产品经理可修改
+  const canEditPriority = hasPermission(currentMember, 'assign_task', roles);
 
   // Filter tasks
   const filtered = (tasks || []).filter((t) => {
@@ -94,7 +103,7 @@ export const ListView: React.FC<ListViewProps> = ({
     backlog: { label: 'Backlog', color: 'bg-slate-100 text-slate-700 border-slate-300' },
     todo: { label: '待办', color: 'bg-blue-100 text-blue-700 border-blue-300' },
     in_progress: { label: '进行中', color: 'bg-amber-100 text-amber-700 border-amber-300' },
-    review: { label: '代码评审', color: 'bg-purple-100 text-purple-700 border-purple-300' },
+    review: { label: '测试', color: 'bg-purple-100 text-purple-700 border-purple-300' },
     done: { label: '已完成', color: 'bg-emerald-100 text-emerald-700 border-emerald-300' },
   };
 
@@ -118,7 +127,7 @@ export const ListView: React.FC<ListViewProps> = ({
             <option value="backlog">Backlog 积压</option>
             <option value="todo">待办 (To Do)</option>
             <option value="in_progress">进行中 (In Progress)</option>
-            <option value="review">代码评审 (Code Review)</option>
+            <option value="review">测试 (Test)</option>
             <option value="done">已完成 (Done)</option>
           </select>
 
@@ -136,29 +145,14 @@ export const ListView: React.FC<ListViewProps> = ({
           </select>
         </div>
 
-        {/* Batch Operations Bar */}
+        {/* Batch Operations Bar: 列表不允许改状态，仅显示已选数量提示 */}
         {selectedTaskIds.length > 0 && (
-          <div className="flex items-center gap-2 bg-emerald-50 border border-emerald-300 px-3 py-1 rounded-xl text-xs text-emerald-800 animate-fadeIn">
-            <span className="font-bold">已选 {selectedTaskIds.length} 项:</span>
-            <span className="text-slate-600">批量修改状态为 →</span>
-            <button
-              onClick={() => handleBatchStatusChange('in_progress')}
-              className="px-2 py-0.5 rounded bg-amber-100 text-amber-800 hover:bg-amber-200 font-medium cursor-pointer"
-            >
-              进行中
-            </button>
-            <button
-              onClick={() => handleBatchStatusChange('review')}
-              className="px-2 py-0.5 rounded bg-purple-100 text-purple-800 hover:bg-purple-200 font-medium cursor-pointer"
-            >
-              代码评审
-            </button>
-            <button
-              onClick={() => handleBatchStatusChange('done')}
-              className="px-2 py-0.5 rounded bg-emerald-100 text-emerald-800 hover:bg-emerald-200 font-medium cursor-pointer"
-            >
-              已完成
-            </button>
+          <div className="flex items-center gap-2 bg-slate-100 border border-slate-200 px-3 py-1 rounded-xl text-xs text-slate-600 animate-fadeIn">
+            <span className="font-bold text-slate-700">已选 {selectedTaskIds.length} 项</span>
+            <span className="flex items-center gap-1 text-slate-500">
+              <Lock className="w-3 h-3" />
+              列表视图不允许修改状态，请到看板/任务详情中操作
+            </span>
           </div>
         )}
 
@@ -179,6 +173,7 @@ export const ListView: React.FC<ListViewProps> = ({
                     className="rounded border-slate-300 bg-white text-emerald-600 focus:ring-0 cursor-pointer"
                   />
                 </th>
+                <th className="p-0 w-1.5" aria-label="颜色标记"></th>
                 <th className="p-3 w-28 cursor-pointer hover:text-slate-800" onClick={() => { setSortField('id'); setSortAsc(!sortAsc); }}>
                   <div className="flex items-center gap-1">
                     <span>任务编号</span>
@@ -208,13 +203,14 @@ export const ListView: React.FC<ListViewProps> = ({
               {sorted.map((task) => {
                 const isSelected = selectedTaskIds.includes(task.id);
                 const st = statusMap[task.status];
+                const taskColor = getTaskColor(task.color);
 
                 return (
                   <tr
                     key={task.id}
                     onClick={() => onTaskClick(task)}
-                    className={`hover:bg-slate-50 transition-colors cursor-pointer ${
-                      isSelected ? 'bg-slate-100/60' : ''
+                    className={`hover:brightness-95 transition-all cursor-pointer ${taskColor.bg || ''} ${
+                      isSelected ? 'ring-1 ring-inset ring-emerald-400' : ''
                     }`}
                   >
                     <td className="p-3 text-center" onClick={(e) => toggleSelectTask(task.id, e)}>
@@ -224,6 +220,11 @@ export const ListView: React.FC<ListViewProps> = ({
                         onChange={() => {}}
                         className="rounded border-slate-300 bg-white text-emerald-600 focus:ring-0 cursor-pointer"
                       />
+                    </td>
+                    <td className="p-0 w-1.5" aria-label="颜色标记">
+                      {task.color && task.color !== 'none' && (
+                        <span className={`block w-full h-full ${taskColor.bar}`} title={taskColor.label} />
+                      )}
                     </td>
                     <td className="p-3 font-mono font-bold text-slate-500 hover:text-emerald-600">
                       {task.id}
@@ -249,23 +250,25 @@ export const ListView: React.FC<ListViewProps> = ({
                       </div>
                     </td>
                     <td className="p-3" onClick={(e) => e.stopPropagation()}>
-                      <select
-                        value={task.status}
-                        onChange={(e) => onUpdateTaskStatus(task.id, e.target.value as TaskStatus)}
-                        className={`text-xs font-semibold px-2 py-1 rounded border ${st.color} focus:outline-none bg-white cursor-pointer`}
+                      <span
+                        className={`inline-flex items-center gap-1 text-xs font-semibold px-2 py-1 rounded border ${st.color}`}
+                        title="列表视图不允许修改状态（请在看板或任务详情中操作）"
                       >
-                        <option value="backlog">Backlog 积压</option>
-                        <option value="todo">待办 To Do</option>
-                        <option value="in_progress">进行中 In Progress</option>
-                        <option value="review">代码评审 Review</option>
-                        <option value="done">已完成 Done</option>
-                      </select>
+                        <Lock className="w-3 h-3 opacity-60" />
+                        {st.label}
+                      </span>
                     </td>
                     <td className="p-3" onClick={(e) => e.stopPropagation()}>
                       <select
                         value={task.priority}
                         onChange={(e) => onUpdateTaskPriority(task.id, e.target.value as TaskPriority)}
-                        className="bg-white border border-slate-200 text-xs font-semibold rounded px-2 py-1 focus:outline-none text-slate-800 cursor-pointer"
+                        disabled={!canEditPriority}
+                        title={canEditPriority ? '修改任务优先级' : '仅管理员 / 产品经理可修改优先级'}
+                        className={`text-xs font-semibold rounded px-2 py-1 focus:outline-none border border-slate-200 ${
+                          canEditPriority
+                            ? 'bg-white text-slate-800 cursor-pointer'
+                            : 'bg-slate-50 text-slate-500 cursor-not-allowed opacity-70'
+                        }`}
                       >
                         <option value="urgent">🔴 紧急 Urgent</option>
                         <option value="high">🟠 高级 High</option>
@@ -314,7 +317,7 @@ export const ListView: React.FC<ListViewProps> = ({
 
               {sorted.length === 0 && (
                 <tr>
-                  <td colSpan={9} className="p-12 text-center text-slate-400 text-sm">
+                  <td colSpan={10} className="p-12 text-center text-slate-400 text-sm">
                     没有找到匹配的任务
                   </td>
                 </tr>

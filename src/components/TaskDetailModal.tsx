@@ -119,7 +119,7 @@ export const TaskDetailModal: React.FC<TaskDetailModalProps> = ({
               <option value="backlog">Backlog 积压</option>
               <option value="todo">待办 (To Do)</option>
               <option value="in_progress">进行中 (In Progress)</option>
-              <option value="review">代码评审 (Code Review)</option>
+              <option value="review">测试 (Test)</option>
               <option value="done">已完成 (Done)</option>
             </select>
 
@@ -140,7 +140,7 @@ export const TaskDetailModal: React.FC<TaskDetailModalProps> = ({
               <button
                 onClick={() => onUpdateTask({ completeDevAndFlow: true, status: 'review' })}
                 className="bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-bold px-3 py-1 rounded-xl flex items-center gap-1 shadow-2xs transition-all cursor-pointer ml-1"
-                title="开发完成，自动流转至测试/代码评审并转交测试人员"
+                title="开发完成，自动流转至测试并转交测试人员"
               >
                 🚀 开发完成，提交测试
               </button>

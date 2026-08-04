@@ -1,5 +1,6 @@
 import React from 'react';
-import { Task, TaskStatus, TaskPriority, Member } from '../types';
+import { Task, TaskStatus, TaskPriority, Member, Role, getTaskColor } from '../types';
+import { hasPermission } from '../permissions';
 import {
   Clock,
   CheckSquare,
@@ -10,11 +11,14 @@ import {
   ArrowLeft,
   AlertCircle,
   Sparkles,
+  Lock,
 } from 'lucide-react';
 
 interface KanbanBoardProps {
   tasks: Task[];
   members: Member[];
+  roles: Role[];
+  currentMember: Member;
   searchQuery: string;
   onTaskClick: (task: Task) => void;
   onUpdateTaskStatus: (taskId: string, newStatus: TaskStatus) => void;
@@ -45,7 +49,7 @@ const COLUMNS: { id: TaskStatus; title: string; color: string; border: string; b
   },
   {
     id: 'review',
-    title: '代码评审 (Code Review)',
+    title: '测试 (Test)',
     color: 'text-purple-700',
     border: 'border-purple-200/80',
     bg: 'bg-purple-50/50',
@@ -62,11 +66,14 @@ const COLUMNS: { id: TaskStatus; title: string; color: string; border: string; b
 export const KanbanBoard: React.FC<KanbanBoardProps> = ({
   tasks,
   members,
+  roles,
+  currentMember,
   searchQuery,
   onTaskClick,
   onUpdateTaskStatus,
   onOpenCreateTaskWithStatus,
 }) => {
+  const canAssignTask = hasPermission(currentMember, 'assign_task', roles);
   const getPriorityBadge = (priority: TaskPriority) => {
     switch (priority) {
       case 'urgent':
@@ -140,13 +147,22 @@ export const KanbanBoard: React.FC<KanbanBoardProps> = ({
                   const totalChecklist = checklist.length;
                   const checklistPercent =
                     totalChecklist > 0 ? Math.round((completedChecklist / totalChecklist) * 100) : 0;
+                  const taskColor = getTaskColor(task.color);
+                  const canEditTask = canAssignTask || (task.assigneeIds?.includes(currentMember.id) ?? false);
 
                   return (
                     <div
                       key={task.id}
                       onClick={() => onTaskClick(task)}
-                      className="group bg-white hover:bg-slate-50/80 border border-slate-200 hover:border-slate-300 rounded-xl p-3.5 shadow-xs hover:shadow-md transition-all cursor-pointer relative"
+                      className={`group relative border ${taskColor.accent || 'border-slate-200'} ${taskColor.bg || 'bg-white'} hover:brightness-95 rounded-xl p-3.5 shadow-xs hover:shadow-md transition-all cursor-pointer overflow-hidden`}
                     >
+                      {/* 颜色标记左侧色条 */}
+                      {task.color && task.color !== 'none' && (
+                        <span
+                          className={`absolute left-0 top-0 bottom-0 w-1 ${taskColor.bar} rounded-l-xl`}
+                          aria-hidden
+                        />
+                      )}
                       {/* Top Row: Task ID & Priority & Transition arrows */}
                       <div className="flex items-center justify-between mb-2">
                         <span className="text-[11px] font-mono font-bold text-slate-400 group-hover:text-emerald-600 transition-colors">
@@ -156,6 +172,7 @@ export const KanbanBoard: React.FC<KanbanBoardProps> = ({
                           {getPriorityBadge(task.priority)}
 
                           {/* Quick move buttons */}
+                          {canEditTask && (
                           <div className="opacity-0 group-hover:opacity-100 transition-opacity flex items-center gap-0.5 bg-white rounded p-0.5 border border-slate-200 shadow-sm">
                             {column.id !== 'backlog' && (
                               <button
@@ -198,6 +215,12 @@ export const KanbanBoard: React.FC<KanbanBoardProps> = ({
                               </button>
                             )}
                           </div>
+                          )}
+                          {!canEditTask && (
+                            <span title="无操作权限">
+                              <Lock className="w-3 h-3 text-slate-300" />
+                            </span>
+                          )}
                         </div>
                       </div>
 

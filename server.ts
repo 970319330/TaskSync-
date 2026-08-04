@@ -4,13 +4,14 @@ import { createServer as createViteServer } from 'vite';
 import { GoogleGenAI } from '@google/genai';
 import {
   INITIAL_MEMBERS,
+  INITIAL_ROLES,
   INITIAL_PROJECTS,
   INITIAL_TASKS,
   INITIAL_CHANNELS,
   INITIAL_MESSAGES,
   INITIAL_NOTIFICATIONS,
 } from './src/mockData';
-import { Task, ChatMessage, TaskComment, TaskActivity, NotificationItem, Project } from './src/types';
+import { Task, ChatMessage, TaskComment, TaskActivity, NotificationItem, Project, Member, Role } from './src/types';
 
 const app = express();
 const PORT = 3000;
@@ -19,6 +20,7 @@ app.use(express.json());
 
 // In-memory persistent state
 let members = [...INITIAL_MEMBERS];
+let roles = [...INITIAL_ROLES];
 let projects = [...INITIAL_PROJECTS];
 let tasks: Task[] = [...INITIAL_TASKS];
 let channels = [...INITIAL_CHANNELS];
@@ -128,10 +130,22 @@ async function callLLM(prompt: string, options: { jsonMode?: boolean } = {}): Pr
   return data.choices?.[0]?.message?.content || '';
 }
 
+// 安全解析 LLM 返回的 JSON,兼容 markdown 代码块包裹的情况
+function safeJsonParse(text: string): any {
+  let cleaned = text.trim();
+  // 去除 markdown 代码块包裹 (```json ... ``` 或 ``` ... ```)
+  const codeBlockMatch = cleaned.match(/^```(?:json)?\s*\n?([\s\S]*?)\n?\s*```$/);
+  if (codeBlockMatch) {
+    cleaned = codeBlockMatch[1].trim();
+  }
+  return JSON.parse(cleaned);
+}
+
 // API Routes
 app.get('/api/state', (req, res) => {
   res.json({
     members,
+    roles,
     projects,
     tasks,
     channels,
@@ -259,6 +273,95 @@ app.put('/api/members/:id/status', (req, res) => {
   res.json({ success: true, members });
 });
 
+// Create Member
+app.post('/api/members', (req, res) => {
+  const data = req.body || {};
+  const newMember: Member = {
+    id: `usr_${Date.now()}`,
+    name: (data.name || '').trim() || '新成员',
+    role: data.role || '团队成员',
+    roleId: data.roleId || undefined,
+    avatar: data.avatar || `https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?auto=format&fit=crop&q=80&w=150`,
+    avatarBg: data.avatarBg || 'bg-slate-600',
+    email: data.email || '',
+    status: 'online',
+    statusText: '新加入团队',
+    workloadCount: 0,
+  };
+  members = [...members, newMember];
+  res.json({ success: true, member: newMember, members });
+});
+
+// Update Member
+app.put('/api/members/:id', (req, res) => {
+  const { id } = req.params;
+  const data = req.body || {};
+  members = members.map((m) =>
+    m.id === id ? {
+      ...m,
+      name: data.name?.trim() || m.name,
+      role: data.role ?? m.role,
+      roleId: data.roleId ?? m.roleId,
+      email: data.email ?? m.email,
+      avatar: data.avatar || m.avatar,
+      avatarBg: data.avatarBg || m.avatarBg,
+      isAdmin: data.isAdmin ?? m.isAdmin,
+    } : m
+  );
+  res.json({ success: true, members });
+});
+
+// Delete Member
+app.delete('/api/members/:id', (req, res) => {
+  const { id } = req.params;
+  members = members.filter((m) => m.id !== id);
+  // 从项目中移除该成员
+  projects = projects.map((p) => ({ ...p, memberIds: p.memberIds.filter((mid) => mid !== id) }));
+  res.json({ success: true, members, projects });
+});
+
+// Create Role
+app.post('/api/roles', (req, res) => {
+  const data = req.body || {};
+  const newRole: Role = {
+    id: `role_${Date.now()}`,
+    name: (data.name || '').trim() || '新角色',
+    description: data.description || '',
+    color: data.color || 'bg-slate-600',
+    permissions: Array.isArray(data.permissions) ? data.permissions : [],
+  };
+  roles = [...roles, newRole];
+  res.json({ success: true, role: newRole, roles });
+});
+
+// Update Role
+app.put('/api/roles/:id', (req, res) => {
+  const { id } = req.params;
+  const data = req.body || {};
+  roles = roles.map((r) =>
+    r.id === id ? {
+      ...r,
+      name: data.name?.trim() || r.name,
+      description: data.description ?? r.description,
+      color: data.color || r.color,
+      permissions: Array.isArray(data.permissions) ? data.permissions : r.permissions,
+    } : r
+  );
+  res.json({ success: true, roles });
+});
+
+// Delete Role
+app.delete('/api/roles/:id', (req, res) => {
+  const { id } = req.params;
+  // 不允许删除仍有成员关联的角色
+  const hasMembers = members.some((m) => m.roleId === id);
+  if (hasMembers) {
+    return res.status(400).json({ error: '该角色仍有成员关联，请先调整成员角色后再删除' });
+  }
+  roles = roles.filter((r) => r.id !== id);
+  res.json({ success: true, roles });
+});
+
 // Create Task
 app.post('/api/tasks', (req, res) => {
   const newTaskData = req.body;
@@ -282,6 +385,7 @@ app.post('/api/tasks', (req, res) => {
     comments: [],
     testerId: newTaskData.testerId || '',
     autoFlowToTest: newTaskData.autoFlowToTest !== false,
+    color: newTaskData.color || 'none',
     activities: [
       {
         id: `act_${Date.now()}`,
@@ -353,7 +457,7 @@ app.put('/api/tasks/:id', (req, res) => {
             taskId: id,
             authorId,
             action: '🚀 开发完成，自动流转测试',
-            details: `开发工作已完成！任务自动进入【代码评审/测试】阶段，经办人已更新交由 ${testerName}`,
+            details: `开发工作已完成！任务自动进入【测试】阶段，经办人已更新交由 ${testerName}`,
             timestamp: nowStr,
           });
 
@@ -364,7 +468,7 @@ app.put('/api/tasks/:id', (req, res) => {
             senderId: authorId,
             type: 'status_change',
             taskId: id,
-            message: `任务 "${t.title}" 开发已完成，自动流转给你进行测试/代码评审`,
+            message: `任务 "${t.title}" 开发已完成，自动流转给你进行测试`,
             isRead: false,
             createdAt: nowStr,
           });
@@ -373,8 +477,8 @@ app.put('/api/tasks/:id', (req, res) => {
             id: `act_${Date.now()}`,
             taskId: id,
             authorId,
-            action: '🚀 开发完成，流转至测试/代码评审',
-            details: `开发工作已完成，任务已流转至【代码评审/测试】阶段`,
+            action: '🚀 开发完成，流转至测试',
+            details: `开发工作已完成，任务已流转至【测试】阶段`,
             timestamp: nowStr,
           });
         }
@@ -385,7 +489,7 @@ app.put('/api/tasks/:id', (req, res) => {
             backlog: 'Backlog 积压',
             todo: '待办 (To Do)',
             in_progress: '进行中 (In Progress)',
-            review: '代码评审 (Code Review)',
+            review: '测试 (Test)',
             done: '已完成 (Done)',
           };
           activities.unshift({
@@ -410,6 +514,29 @@ app.put('/api/tasks/:id', (req, res) => {
           timestamp: nowStr,
         });
       }
+
+      // 来自 MCP 工具的备注：作为评论写入
+      if (updates.activityNote) {
+        const newComment: TaskComment = {
+          id: `comment_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`,
+          taskId: id,
+          authorId,
+          content: updates.activityNote,
+          timestamp: nowStr,
+        };
+        const comments = [...(t.comments || []), newComment];
+        updates.comments = comments;
+        activities.unshift({
+          id: `act_${Date.now()}`,
+          taskId: id,
+          authorId,
+          action: 'MCP 工具添加了备注',
+          details: updates.activityNote,
+          timestamp: nowStr,
+        });
+      }
+      // 清理仅供后端消费的字段
+      delete updates.activityNote;
 
       // 清除辅助请求标记避免多存
       delete updates.completeDevAndFlow;
@@ -577,7 +704,7 @@ app.post('/api/copilot/decompose', async (req, res) => {
 }`;
 
     const jsonText = (await callLLM(prompt, { jsonMode: true })).trim() || '{}';
-    const parsed = JSON.parse(jsonText);
+    const parsed = safeJsonParse(jsonText);
 
     const checklistItems = (parsed.checklist || []).map((itemTitle: string, index: number) => ({
       id: `chk_gen_${Date.now()}_${index}`,
@@ -648,7 +775,7 @@ ${truncated}
 }`;
 
     const jsonText = (await callLLM(prompt, { jsonMode: true })).trim() || '{}';
-    const parsed = JSON.parse(jsonText);
+    const parsed = safeJsonParse(jsonText);
     const llmTasks = Array.isArray(parsed.tasks) ? parsed.tasks : [];
 
     const nowStr = new Date().toISOString().replace('T', ' ').substring(0, 16);
@@ -747,6 +874,588 @@ app.post('/api/notifications/mark-read', (req, res) => {
     n.recipientId === recipientId ? { ...n, isRead: true } : n
   );
   res.json({ success: true, notifications });
+});
+
+// ============ 禅道数据同步 ============
+const ZENTAO_BASE = 'http://124.70.211.186:7099/zentao';
+
+// 缓存禅道会话 ID（sync 登录后更新，图片代理接口复用）
+let zentaoCachedSid = '';
+
+// 禅道状态 -> TaskSync 状态
+const mapZentaoStatus = (status: string): string => {
+  switch (status) {
+    case 'wait': return 'todo';
+    case 'doing': return 'in_progress';
+    case 'done':
+    case 'closed': return 'done';
+    case 'pause':
+    case 'cancel': return 'backlog';
+    default: return 'todo';
+  }
+};
+
+// 禅道优先级(1-4) -> TaskSync 优先级
+const mapZentaoPriority = (pri: string | number): string => {
+  const n = Number(pri);
+  if (n === 1) return 'urgent';
+  if (n === 2) return 'high';
+  if (n === 3) return 'medium';
+  return 'low';
+};
+
+// 禅道操作动作 -> 中文描述
+const mapZentaoAction = (action: string): string => {
+  const map: Record<string, string> = {
+    opened: '创建任务',
+    started: '开始任务',
+    finished: '完成任务',
+    closed: '关闭任务',
+    paused: '暂停任务',
+    canceled: '取消任务',
+    assigned: '指派任务',
+    changed: '修改任务',
+    edited: '编辑任务',
+    commented: '添加备注',
+    activated: '激活任务',
+    recordestimate: '记录工时',
+  };
+  return map[action] || action;
+};
+
+// 将禅道 HTML 中的图片 src 转换为代理 URL，并将 <img> 转为 Markdown 图片语法
+const processZentaoHtml = (html: string): string => {
+  if (!html) return '';
+  let result = html;
+
+  // 匹配 <img> 标签，提取 src，转换为 Markdown 图片
+  result = result.replace(/<img[^>]+src=["']([^"']+)["'][^>]*\/?>/gi, (_, src) => {
+    let fullUrl: string;
+    if (src.startsWith('http://') || src.startsWith('https://')) {
+      fullUrl = src;
+    } else {
+      // 相对路径，拼接禅道服务器前缀
+      fullUrl = `http://124.70.211.186:7099${src.startsWith('/') ? '' : '/'}${src}`;
+    }
+    const proxyUrl = `/api/zentao/image?url=${encodeURIComponent(fullUrl)}`;
+    return `\n![图片](${proxyUrl})\n`;
+  });
+
+  // 清理其他 HTML 标签，保留已转换的 Markdown
+  result = result.replace(/<[^>]+>/g, '').replace(/&nbsp;/g, ' ').replace(/&amp;/g, '&').replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&quot;/g, '"').trim();
+  return result;
+};
+
+// 构建任务描述：任务描述 + 需求规格 + 验收标准 + 模块路径（保留图片）
+const buildZentaoDescription = (zt: any): string => {
+  const parts: string[] = [];
+
+  if (zt.desc && zt.desc.trim()) {
+    const cleanDesc = processZentaoHtml(zt.desc);
+    if (cleanDesc) parts.push(`**任务描述**\n${cleanDesc}`);
+  }
+
+  if (zt.storyTitle) {
+    parts.push(`**关联需求**: ${zt.storyTitle}`);
+  }
+
+  if (zt.storySpec && zt.storySpec.trim()) {
+    const cleanSpec = processZentaoHtml(zt.storySpec);
+    if (cleanSpec) parts.push(`**需求规格**\n${cleanSpec}`);
+  }
+
+  if (zt.storyVerify && zt.storyVerify.trim()) {
+    const cleanVerify = processZentaoHtml(zt.storyVerify);
+    if (cleanVerify) parts.push(`**验收标准**\n${cleanVerify}`);
+  }
+
+  if (zt.modulePath) {
+    parts.push(`**模块路径**: ${zt.modulePath}`);
+  }
+
+  if (zt.parentName) {
+    parts.push(`**父任务**: ${zt.parentName}`);
+  }
+
+  parts.push(`**任务类型**: ${zt.type || 'devel'}`);
+  parts.push(`**进度**: ${zt.progress || 0}%`);
+
+  return parts.join('\n\n') || `类型: ${zt.type || 'devel'}`;
+};
+
+app.post('/api/zentao/sync', async (req, res) => {
+  const { account = 'zhangq', password = 'zhangq' } = req.body;
+
+  try {
+    // 步骤1: 获取 Session ID
+    const sessionRes = await fetch(`${ZENTAO_BASE}/api-getSessionID.json`);
+    const sessionJson = await sessionRes.json();
+    const sessionData = JSON.parse(sessionJson.data);
+    const sessionID = sessionData.sessionID;
+    const sessionName = sessionData.sessionName;
+
+    // 步骤2: 登录
+    const loginRes = await fetch(`${ZENTAO_BASE}/user-login.json`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/x-www-form-urlencoded',
+        'Cookie': `${sessionName}=${sessionID}`,
+      },
+      body: `account=${account}&password=${password}`,
+    });
+    const loginText = await loginRes.text();
+    const setCookie = loginRes.headers.get('set-cookie') || '';
+    // 提取最新的 zentaosid
+    const cookieMatch = setCookie.match(/zentaosid=([^;]+)/);
+    const finalSid = cookieMatch ? cookieMatch[1] : sessionID;
+    // 缓存 sid 供图片代理接口使用
+    zentaoCachedSid = finalSid;
+
+    // 检查登录是否成功（返回内容包含用户信息或 load）
+    if (!loginText.includes('"account"') && !loginText.includes('load')) {
+      // 尝试另一种检测方式：如果返回了用户信息 JSON
+      try {
+        const loginJson = JSON.parse(loginText);
+        if (loginJson.status === 'failed') {
+          return res.status(401).json({ error: '禅道登录失败，请检查账号密码' });
+        }
+      } catch {}
+    }
+
+    // 步骤3: 获取任务数据
+    const taskRes = await fetch(`${ZENTAO_BASE}/my-task.json`, {
+      headers: { 'Cookie': `zentaosid=${finalSid}` },
+    });
+    const taskJson = await taskRes.json();
+
+    // data 字段是二次 JSON 编码的字符串
+    const data = JSON.parse(taskJson.data);
+    const ztTasks = data.tasks || [];
+
+    // 转换为 TaskSync 格式（列表基础信息）
+    const mappedTasks = ztTasks.map((t: any) => ({
+      ztId: t.id,
+      id: `ZT-${t.id}`,
+      title: t.name || '(无标题)',
+      status: mapZentaoStatus(t.status),
+      priority: mapZentaoPriority(t.pri),
+      projectName: t.projectName || '未分类项目',
+      projectId: t.project || '',
+      estimate: t.estimate || '0',
+      consumed: t.consumed || '0',
+      left: t.left || '0',
+      deadline: t.deadline && t.deadline !== '0000-00-00' ? t.deadline : '',
+      assignedTo: t.assignedTo || '',
+      openedBy: t.openedBy || '',
+      openedDate: t.openedDate || '',
+      type: t.type || 'devel',
+      storyTitle: t.storyTitle || '',
+    }));
+
+    // 步骤4: 批量获取每个任务的详情（task-view-{id}.json）
+    const detailHeaders = { 'Cookie': `zentaosid=${finalSid}` };
+    for (const mt of mappedTasks) {
+      try {
+        const detailRes = await fetch(`${ZENTAO_BASE}/task-view-${mt.ztId}.json`, { headers: detailHeaders });
+        const detailJson = await detailRes.json();
+        const detailData = JSON.parse(detailJson.data);
+        const dt = detailData.task || {};
+
+        // 补充详情字段
+        mt.desc = dt.desc || '';
+        mt.storySpec = dt.storySpec || '';
+        mt.storyVerify = dt.storyVerify || '';
+        mt.progress = dt.progress ?? 0;
+        mt.realStarted = dt.realStarted || '';
+        mt.parent = dt.parent || '0';
+        mt.parentName = dt.parentName || '';
+        mt.assignedToRealName = dt.assignedToRealName || '';
+        mt.lastEditedBy = dt.lastEditedBy || '';
+        mt.lastEditedDate = dt.lastEditedDate || '';
+        mt.modulePath = (detailData.modulePath || []).map((m: any) => m.name || '').filter(Boolean).join(' > ');
+
+        // 操作动态
+        const actions = detailData.actions || {};
+        mt.activities = Object.values(actions).map((a: any) => ({
+          actor: a.actor || '',
+          action: a.action || '',
+          date: a.date || '',
+          comment: a.comment || '',
+        }));
+      } catch (e) {
+        // 单个任务详情获取失败不影响整体
+        mt.desc = '';
+        mt.activities = [];
+      }
+    }
+
+    res.json({
+      success: true,
+      memberName: account,
+      taskCount: mappedTasks.length,
+      tasks: mappedTasks,
+    });
+  } catch (err: any) {
+    console.error('Zentao sync error:', err);
+    res.status(500).json({ error: `禅道同步失败: ${err.message || '未知错误'}` });
+  }
+});
+
+// 导入禅道任务到 TaskSync
+app.post('/api/zentao/import', (req, res) => {
+  const { tasks: ztTasks, targetProjectId, memberId } = req.body;
+
+  if (!Array.isArray(ztTasks) || ztTasks.length === 0) {
+    return res.json({ success: true, imported: 0, tasks: [] });
+  }
+
+  // 按 projectName 分组，为每个禅道项目创建/复用 TaskSync 项目
+  const projectMap = new Map<string, string>(); // projectName -> projectId
+  let newTasks: Task[] = [];
+
+  for (const zt of ztTasks) {
+    let projectId = targetProjectId;
+
+    // 如果没有指定目标项目，按禅道项目名创建/复用
+    if (!projectId) {
+      const pName = zt.projectName;
+      if (projectMap.has(pName)) {
+        projectId = projectMap.get(pName)!;
+      } else {
+        // 查找已有项目
+        const existing = projects.find((p) => p.name === pName);
+        if (existing) {
+          projectId = existing.id;
+        } else {
+          // 创建新项目
+          projectId = `zentao-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
+          projects.push({
+            id: projectId,
+            name: pName,
+            key: `ZT-${zt.projectId}`,
+            description: `禅道同步项目（来源: ${zt.projectId}）`,
+            color: '#6366f1',
+            memberIds: memberId ? [memberId] : [],
+          });
+        }
+        projectMap.set(pName, projectId);
+      }
+    }
+
+    // 检查是否已存在同 ID 的任务（避免重复导入）
+    const existingTask = tasks.find((t) => t.id === zt.id);
+    if (existingTask) {
+      // 更新已有任务
+      Object.assign(existingTask, {
+        title: zt.title,
+        status: zt.status,
+        priority: zt.priority,
+        dueDate: zt.deadline,
+        estimatedHours: parseFloat(zt.estimate) || 0,
+        loggedHours: parseFloat(zt.consumed) || 0,
+        tags: [zt.type, ...(zt.storyTitle ? [`需求: ${zt.storyTitle}`] : []), ...(zt.modulePath ? [`模块: ${zt.modulePath}`] : [])],
+      });
+      // 更新描述（如果详情有数据）
+      if (zt.desc || zt.storySpec) {
+        existingTask.description = buildZentaoDescription(zt);
+      }
+      continue;
+    }
+
+    const now = new Date().toISOString();
+
+    // 构建活动记录：禅道操作动态 + 同步导入记录
+    const ztActivities: TaskActivity[] = [];
+    if (Array.isArray(zt.activities)) {
+      for (const a of zt.activities) {
+        ztActivities.push({
+          id: `act-zt-${zt.ztId}-${a.date || Date.now()}-${Math.random().toString(36).slice(2, 4)}`,
+          taskId: zt.id,
+          action: mapZentaoAction(a.action),
+          authorId: memberId || '1',
+          timestamp: a.date ? a.date.replace(' ', 'T') : now,
+          details: a.comment || '',
+        });
+      }
+    }
+    ztActivities.push({
+      id: `act-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
+      taskId: zt.id,
+      action: '从禅道同步导入',
+      authorId: memberId || '1',
+      timestamp: now,
+      details: `禅道任务 ID: ${zt.ztId}${zt.parentName ? ` | 父任务: ${zt.parentName}` : ''}`,
+    });
+
+    newTasks.push({
+      id: zt.id,
+      title: zt.title,
+      description: buildZentaoDescription(zt),
+      status: zt.status,
+      priority: zt.priority,
+      assigneeIds: memberId ? [memberId] : [],
+      reporterId: memberId || '1',
+      projectId,
+      startDate: zt.realStarted || (zt.openedDate ? zt.openedDate.split(' ')[0] : ''),
+      dueDate: zt.deadline,
+      estimatedHours: parseFloat(zt.estimate) || 0,
+      loggedHours: parseFloat(zt.consumed) || 0,
+      tags: [zt.type, ...(zt.storyTitle ? [`需求: ${zt.storyTitle}`] : []), ...(zt.modulePath ? [`模块: ${zt.modulePath}`] : [])],
+      checklist: [],
+      comments: [],
+      activities: ztActivities,
+      attachmentsCount: 0,
+      createdAt: zt.openedDate || now,
+      updatedAt: zt.lastEditedDate || now,
+    });
+  }
+
+  tasks.push(...newTasks);
+
+  res.json({
+    success: true,
+    imported: newTasks.length,
+    updated: ztTasks.length - newTasks.length,
+    tasks: newTasks,
+    projects,
+  });
+});
+
+// 禅道登录：登录 + 同步任务 + 导入 + 匹配本地成员，一步到位
+app.post('/api/zentao/login', async (req, res) => {
+  const { account = 'zhangq', password = 'zhangq' } = req.body;
+
+  try {
+    // 步骤1: 获取 Session ID
+    const sessionRes = await fetch(`${ZENTAO_BASE}/api-getSessionID.json`);
+    const sessionJson = await sessionRes.json();
+    const sessionData = JSON.parse(sessionJson.data);
+    const sessionID = sessionData.sessionID;
+    const sessionName = sessionData.sessionName;
+
+    // 步骤2: 登录
+    const loginRes = await fetch(`${ZENTAO_BASE}/user-login.json`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/x-www-form-urlencoded',
+        'Cookie': `${sessionName}=${sessionID}`,
+      },
+      body: `account=${account}&password=${password}`,
+    });
+    const loginText = await loginRes.text();
+    const setCookie = loginRes.headers.get('set-cookie') || '';
+    const cookieMatch = setCookie.match(/zentaosid=([^;]+)/);
+    const finalSid = cookieMatch ? cookieMatch[1] : sessionID;
+    zentaoCachedSid = finalSid;
+
+    // 尝试从登录返回中提取用户真实姓名
+    let zentaoRealName = account;
+    try {
+      const loginJson = JSON.parse(loginText);
+      if (loginJson.status === 'failed') {
+        return res.status(401).json({ error: '禅道登录失败，请检查账号密码' });
+      }
+      const userData = typeof loginJson.data === 'string' ? JSON.parse(loginJson.data) : loginJson.data;
+      if (userData?.realname) zentaoRealName = userData.realname;
+      else if (userData?.name) zentaoRealName = userData.name;
+    } catch {}
+
+    // 步骤3: 获取任务列表
+    const taskRes = await fetch(`${ZENTAO_BASE}/my-task.json`, {
+      headers: { 'Cookie': `zentaosid=${finalSid}` },
+    });
+    const taskJson = await taskRes.json();
+    const data = JSON.parse(taskJson.data);
+    const ztTasks = data.tasks || [];
+
+    // 步骤4: 批量获取任务详情
+    const detailHeaders = { 'Cookie': `zentaosid=${finalSid}` };
+    const mappedTasks = ztTasks.map((t: any) => ({
+      ztId: t.id,
+      id: `ZT-${t.id}`,
+      title: t.name || '(无标题)',
+      status: mapZentaoStatus(t.status),
+      priority: mapZentaoPriority(t.pri),
+      projectName: t.projectName || '未分类项目',
+      projectId: t.project || '',
+      estimate: t.estimate || '0',
+      consumed: t.consumed || '0',
+      left: t.left || '0',
+      deadline: t.deadline && t.deadline !== '0000-00-00' ? t.deadline : '',
+      assignedTo: t.assignedTo || '',
+      openedBy: t.openedBy || '',
+      openedDate: t.openedDate || '',
+      type: t.type || 'devel',
+      storyTitle: t.storyTitle || '',
+    }));
+
+    for (const mt of mappedTasks) {
+      try {
+        const detailRes = await fetch(`${ZENTAO_BASE}/task-view-${mt.ztId}.json`, { headers: detailHeaders });
+        const detailJson = await detailRes.json();
+        const detailData = JSON.parse(detailJson.data);
+        const dt = detailData.task || {};
+        mt.desc = dt.desc || '';
+        mt.storySpec = dt.storySpec || '';
+        mt.storyVerify = dt.storyVerify || '';
+        mt.progress = dt.progress ?? 0;
+        mt.realStarted = dt.realStarted || '';
+        mt.parent = dt.parent || '0';
+        mt.parentName = dt.parentName || '';
+        mt.assignedToRealName = dt.assignedToRealName || '';
+        mt.lastEditedBy = dt.lastEditedBy || '';
+        mt.lastEditedDate = dt.lastEditedDate || '';
+        mt.modulePath = (detailData.modulePath || []).map((m: any) => m.name || '').filter(Boolean).join(' > ');
+        const actions = detailData.actions || {};
+        mt.activities = Object.values(actions).map((a: any) => ({
+          actor: a.actor || '', action: a.action || '', date: a.date || '', comment: a.comment || '',
+        }));
+      } catch {
+        mt.desc = ''; mt.activities = [];
+      }
+    }
+
+    // 步骤5: 匹配本地成员（先按 zentaoAccount，再按 realname）
+    let member = members.find((m) => m.zentaoAccount === account);
+    if (!member && zentaoRealName !== account) {
+      member = members.find((m) => m.name.includes(zentaoRealName) || zentaoRealName.includes(m.name.split(' ')[0]));
+    }
+    // 匹配不到则创建新成员
+    if (!member) {
+      const newMemberId = `usr_zt_${Date.now()}`;
+      member = {
+        id: newMemberId,
+        name: zentaoRealName,
+        role: '研发工程师',
+        roleId: 'role_dev',
+        avatar: `https://api.dicebear.com/7.x/initials/svg?seed=${encodeURIComponent(zentaoRealName)}`,
+        avatarBg: 'bg-indigo-600',
+        email: `${account}@zentao.sync`,
+        status: 'online',
+        statusText: '从禅道登录',
+        workloadCount: mappedTasks.length,
+        zentaoAccount: account,
+      };
+      members.push(member);
+    }
+
+    // 步骤6: 导入任务
+    const projectMap = new Map<string, string>();
+    let importedCount = 0;
+    let updatedCount = 0;
+
+    for (const zt of mappedTasks) {
+      let projectId: string | undefined;
+      const pName = zt.projectName;
+      if (projectMap.has(pName)) {
+        projectId = projectMap.get(pName)!;
+      } else {
+        const existing = projects.find((p) => p.name === pName);
+        if (existing) {
+          projectId = existing.id;
+        } else {
+          projectId = `zentao-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
+          projects.push({
+            id: projectId, name: pName, key: `ZT-${zt.projectId}`,
+            description: `禅道同步项目（来源: ${zt.projectId}）`, color: '#6366f1',
+            memberIds: [member!.id],
+          });
+        }
+        projectMap.set(pName, projectId);
+      }
+
+      const existingTask = tasks.find((t) => t.id === zt.id);
+      if (existingTask) {
+        Object.assign(existingTask, {
+          title: zt.title, status: zt.status, priority: zt.priority, dueDate: zt.deadline,
+          estimatedHours: parseFloat(zt.estimate) || 0, loggedHours: parseFloat(zt.consumed) || 0,
+          tags: [zt.type, ...(zt.storyTitle ? [`需求: ${zt.storyTitle}`] : []), ...(zt.modulePath ? [`模块: ${zt.modulePath}`] : [])],
+        });
+        if (zt.desc || zt.storySpec) existingTask.description = buildZentaoDescription(zt);
+        updatedCount++;
+        continue;
+      }
+
+      const now = new Date().toISOString();
+      const ztActivities: TaskActivity[] = [];
+      if (Array.isArray(zt.activities)) {
+        for (const a of zt.activities) {
+          ztActivities.push({
+            id: `act-zt-${zt.ztId}-${a.date || Date.now()}-${Math.random().toString(36).slice(2, 4)}`,
+            taskId: zt.id, action: mapZentaoAction(a.action), authorId: member!.id,
+            timestamp: a.date ? a.date.replace(' ', 'T') : now, details: a.comment || '',
+          });
+        }
+      }
+      ztActivities.push({
+        id: `act-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
+        taskId: zt.id, action: '从禅道同步导入', authorId: member!.id, timestamp: now,
+        details: `禅道任务 ID: ${zt.ztId}${zt.parentName ? ` | 父任务: ${zt.parentName}` : ''}`,
+      });
+
+      tasks.push({
+        id: zt.id, title: zt.title, description: buildZentaoDescription(zt),
+        status: zt.status, priority: zt.priority,
+        assigneeIds: [member!.id], reporterId: member!.id, projectId,
+        startDate: zt.realStarted || (zt.openedDate ? zt.openedDate.split(' ')[0] : ''),
+        dueDate: zt.deadline, estimatedHours: parseFloat(zt.estimate) || 0,
+        loggedHours: parseFloat(zt.consumed) || 0,
+        tags: [zt.type, ...(zt.storyTitle ? [`需求: ${zt.storyTitle}`] : []), ...(zt.modulePath ? [`模块: ${zt.modulePath}`] : [])],
+        checklist: [], comments: [], activities: ztActivities, attachmentsCount: 0,
+        createdAt: zt.openedDate || now, updatedAt: zt.lastEditedDate || now,
+      });
+      importedCount++;
+    }
+
+    res.json({
+      success: true,
+      memberId: member.id,
+      memberName: member.name,
+      taskCount: mappedTasks.length,
+      imported: importedCount,
+      updated: updatedCount,
+    });
+  } catch (err: any) {
+    console.error('Zentao login error:', err);
+    res.status(500).json({ error: `禅道登录失败: ${err.message || '未知错误'}` });
+  }
+});
+
+// 禅道图片代理（携带 zentaosid 请求禅道图片，返回给前端）
+app.get('/api/zentao/image', async (req, res) => {
+  const url = req.query.url as string;
+  if (!url) {
+    return res.status(400).send('Missing url parameter');
+  }
+
+  // 安全检查：只允许代理禅道服务器的图片
+  if (!url.startsWith('http://124.70.211.186:7099')) {
+    return res.status(403).send('Forbidden: only zentao server images allowed');
+  }
+
+  if (!zentaoCachedSid) {
+    return res.status(401).send('No cached zentao session, please sync first');
+  }
+
+  try {
+    const imageRes = await fetch(url, {
+      headers: { 'Cookie': `zentaosid=${zentaoCachedSid}` },
+    });
+
+    if (!imageRes.ok) {
+      return res.status(imageRes.status).send(`Image fetch failed: ${imageRes.status}`);
+    }
+
+    const contentType = imageRes.headers.get('content-type') || 'image/png';
+    const buffer = await imageRes.arrayBuffer();
+
+    res.setHeader('Content-Type', contentType);
+    res.setHeader('Cache-Control', 'public, max-age=86400');
+    res.send(Buffer.from(buffer));
+  } catch (err: any) {
+    console.error('Zentao image proxy error:', err);
+    res.status(500).send('Image proxy error');
+  }
 });
 
 // Start Express + Vite

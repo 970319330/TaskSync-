@@ -14,8 +14,13 @@ import {
   UserCheck,
   CheckCircle2,
   Settings,
+  Users,
+  LogOut,
+  Lock,
+  Server,
 } from 'lucide-react';
-import { Project, Member, ViewMode, NotificationItem } from '../types';
+import { Project, Member, ViewMode, NotificationItem, Role } from '../types';
+import { hasPermission } from '../permissions';
 import { NotificationDropdown } from './NotificationDropdown';
 
 interface NavbarProps {
@@ -24,7 +29,9 @@ interface NavbarProps {
   onSelectProject: (p: Project) => void;
   members: Member[];
   currentMember: Member;
+  canSwitchMember: boolean;
   onSelectCurrentMember: (m: Member) => void;
+  onLogout: () => void;
   viewMode: ViewMode;
   onSelectViewMode: (v: ViewMode) => void;
   searchQuery: string;
@@ -34,12 +41,15 @@ interface NavbarProps {
   onOpenCreateProject: () => void;
   onOpenManageProject: () => void;
   onOpenSettings: () => void;
+  onOpenTeamModal: () => void;
+  onOpenZentaoSync: () => void;
   notifications: NotificationItem[];
   showNotificationsDropdown: boolean;
   onOpenNotifications: () => void;
   onCloseNotifications: () => void;
   onMarkNotificationsRead: () => void;
   onTaskClickById: (taskId: string) => void;
+  roles: Role[];
 }
 
 export const Navbar: React.FC<NavbarProps> = ({
@@ -48,7 +58,9 @@ export const Navbar: React.FC<NavbarProps> = ({
   onSelectProject,
   members,
   currentMember,
+  canSwitchMember,
   onSelectCurrentMember,
+  onLogout,
   viewMode,
   onSelectViewMode,
   searchQuery,
@@ -58,12 +70,15 @@ export const Navbar: React.FC<NavbarProps> = ({
   onOpenCreateProject,
   onOpenManageProject,
   onOpenSettings,
+  onOpenTeamModal,
+  onOpenZentaoSync,
   notifications,
   showNotificationsDropdown,
   onOpenNotifications,
   onCloseNotifications,
   onMarkNotificationsRead,
   onTaskClickById,
+  roles,
 }) => {
   const [showProjectMenu, setShowProjectMenu] = useState(false);
   const [showMemberMenu, setShowMemberMenu] = useState(false);
@@ -82,7 +97,8 @@ export const Navbar: React.FC<NavbarProps> = ({
   ];
 
   return (
-    <header id="main-navbar" className="bg-white border-b border-slate-200 text-slate-800 sticky top-0 z-30 shadow-xs">
+    <>
+    <header id="main-navbar" className="bg-white border-b border-slate-200 text-slate-800 sticky top-0 z-30">
       <div className="max-w-[1600px] mx-auto px-4 sm:px-6 lg:px-8 h-16 flex items-center justify-between gap-3 sm:gap-4">
         
         {/* Left: Brand Logo & Project Switcher */}
@@ -166,29 +182,7 @@ export const Navbar: React.FC<NavbarProps> = ({
           </div>
         </div>
 
-        {/* Center Navigation Tabs (Desktop) */}
-        <nav className="hidden xl:flex items-center gap-1 bg-slate-100/90 p-1 rounded-xl border border-slate-200 shrink-0">
-          {navItems.map((item) => {
-            const Icon = item.icon;
-            const isActive = viewMode === item.id;
-            return (
-              <button
-                key={item.id}
-                id={`nav-tab-${item.id}`}
-                onClick={() => onSelectViewMode(item.id)}
-                className={`flex items-center gap-2 px-3.5 py-1.5 rounded-lg text-xs font-medium transition-all whitespace-nowrap shrink-0 cursor-pointer ${
-                  isActive
-                    ? 'bg-emerald-600 text-white font-semibold shadow-sm'
-                    : 'text-slate-600 hover:text-slate-900 hover:bg-slate-200/60'
-                }`}
-              >
-                <Icon className="w-4 h-4 shrink-0" />
-                <span className="whitespace-nowrap">{item.label}</span>
-              </button>
-            );
-          })}
-        </nav>
-
+        {/* Center Navigation Tabs (Desktop) - moved out of head, see below */}
         {/* Right Controls: Search, Create, AI, User Account */}
         <div className="flex items-center gap-2 sm:gap-3 shrink-0">
           {/* Search Box */}
@@ -253,6 +247,26 @@ export const Navbar: React.FC<NavbarProps> = ({
             )}
           </div>
 
+          {/* Team Management */}
+          {hasPermission(currentMember, 'manage_members', roles) && (
+            <button
+              onClick={onOpenTeamModal}
+              className="p-2 rounded-lg text-slate-600 hover:text-slate-900 hover:bg-slate-100 transition-colors cursor-pointer shrink-0"
+              title="团队管理"
+            >
+              <Users className="w-4 h-4" />
+            </button>
+          )}
+
+          {/* 禅道数据同步 */}
+          <button
+            onClick={onOpenZentaoSync}
+            className="p-2 rounded-lg text-slate-600 hover:text-indigo-600 hover:bg-indigo-50 transition-colors cursor-pointer shrink-0"
+            title="禅道数据同步"
+          >
+            <Server className="w-4 h-4" />
+          </button>
+
           {/* System Settings */}
           <button
             id="system-settings-btn"
@@ -263,12 +277,26 @@ export const Navbar: React.FC<NavbarProps> = ({
             <Settings className="w-4 h-4" />
           </button>
 
+          {/* 登出按钮（所有用户可见） */}
+          <button
+            onClick={onLogout}
+            className="p-2 rounded-lg text-slate-600 hover:text-rose-600 hover:bg-rose-50 transition-colors cursor-pointer shrink-0"
+            title="退出登录"
+          >
+            <LogOut className="w-4 h-4" />
+          </button>
+
           {/* Current Member Role Switcher */}
           <div className="relative shrink-0">
             <button
               id="current-user-switcher-btn"
-              onClick={() => setShowMemberMenu(!showMemberMenu)}
-              className="flex items-center gap-2 p-1 pl-1.5 pr-2 rounded-xl bg-slate-100 border border-slate-200 hover:bg-slate-200/80 transition-colors shrink-0 cursor-pointer"
+              onClick={() => canSwitchMember && setShowMemberMenu(!showMemberMenu)}
+              className={`flex items-center gap-2 p-1 pl-1.5 pr-2 rounded-xl bg-slate-100 border border-slate-200 transition-colors shrink-0 ${
+                canSwitchMember
+                  ? 'hover:bg-slate-200/80 cursor-pointer'
+                  : 'cursor-default opacity-90'
+              }`}
+              title={canSwitchMember ? '切换当前协作视角' : '已锁定为登录身份（仅管理员 / 产品经理可切换视角）'}
             >
               <img
                 src={currentMember.avatar}
@@ -283,10 +311,14 @@ export const Navbar: React.FC<NavbarProps> = ({
                   {currentMember.role.split(' ')[0]}
                 </span>
               </div>
-              <ChevronDown className="w-3.5 h-3.5 text-slate-500 shrink-0" />
+              {canSwitchMember ? (
+                <ChevronDown className="w-3.5 h-3.5 text-slate-500 shrink-0" />
+              ) : (
+                <Lock className="w-3.5 h-3.5 text-slate-400 shrink-0" />
+              )}
             </button>
 
-            {showMemberMenu && (
+            {canSwitchMember && showMemberMenu && (
               <div className="absolute right-0 mt-2 w-64 bg-white border border-slate-200 rounded-xl shadow-xl py-2 z-50">
                 <div className="px-3 py-1.5 text-[11px] font-semibold text-slate-400 uppercase tracking-wider flex items-center gap-1.5">
                   <UserCheck className="w-3.5 h-3.5 text-emerald-600" />
@@ -317,6 +349,17 @@ export const Navbar: React.FC<NavbarProps> = ({
                     )}
                   </button>
                 ))}
+
+                {/* 登出 */}
+                <div className="border-t border-slate-100 mt-1 pt-1">
+                  <button
+                    onClick={onLogout}
+                    className="w-full text-left px-3 py-2 text-xs flex items-center gap-2.5 text-rose-600 hover:bg-rose-50 transition-colors cursor-pointer font-medium"
+                  >
+                    <LogOut className="w-4 h-4 shrink-0" />
+                    <span>退出登录</span>
+                  </button>
+                </div>
               </div>
             )}
           </div>
@@ -325,7 +368,7 @@ export const Navbar: React.FC<NavbarProps> = ({
       </div>
 
       {/* Sub-header Nav Tabs (Mobile / Tablet / Medium screens) */}
-      <div className="xl:hidden flex items-center gap-1.5 overflow-x-auto scrollbar-none border-t border-slate-200 bg-slate-50 px-3 py-2">
+      <div className="xl:hidden flex items-center gap-1.5 overflow-x-auto scrollbar-none border-t border-slate-200 bg-slate-50 px-3 py-2 shadow-xs">
         {navItems.map((item) => {
           const Icon = item.icon;
           const isActive = viewMode === item.id;
@@ -346,5 +389,37 @@ export const Navbar: React.FC<NavbarProps> = ({
         })}
       </div>
     </header>
+
+    {/* 独立 Tabs Panel：移出 head，显示在 head panel 下方 */}
+    <div
+      id="head-tabs-panel-wrapper"
+      className="hidden xl:block bg-white border-b border-slate-200 px-4 sm:px-6 lg:px-8 py-2 shadow-xs"
+    >
+      <nav
+        id="head-tabs-panel"
+        className="flex items-center justify-center gap-1 bg-slate-100/90 p-1 rounded-xl border border-slate-200 shrink-0 mx-auto w-fit shadow-xs"
+      >
+        {navItems.map((item) => {
+          const Icon = item.icon;
+          const isActive = viewMode === item.id;
+          return (
+            <button
+              key={item.id}
+              id={`nav-tab-${item.id}`}
+              onClick={() => onSelectViewMode(item.id)}
+              className={`flex items-center gap-2 px-3.5 py-1.5 rounded-lg text-xs font-medium transition-all whitespace-nowrap shrink-0 cursor-pointer ${
+                isActive
+                  ? 'bg-emerald-600 text-white font-semibold shadow-sm'
+                  : 'text-slate-600 hover:text-slate-900 hover:bg-slate-200/60'
+              }`}
+            >
+              <Icon className="w-4 h-4 shrink-0" />
+              <span className="whitespace-nowrap">{item.label}</span>
+            </button>
+          );
+        })}
+      </nav>
+    </div>
+    </>
   );
 };

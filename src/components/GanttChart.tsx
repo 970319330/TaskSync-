@@ -36,7 +36,7 @@ export const GanttChart: React.FC<GanttChartProps> = ({ tasks, members, onTaskCl
           </div>
           <div className="flex items-center gap-1.5">
             <span className="w-3 h-3 rounded bg-purple-600 inline-block" />
-            <span>代码评审</span>
+            <span>测试</span>
           </div>
           <div className="flex items-center gap-1.5">
             <span className="w-3 h-3 rounded bg-emerald-600 inline-block" />

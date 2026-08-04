@@ -1,6 +1,8 @@
-import React, { useState } from 'react';
-import { Task, TaskStatus, TaskPriority, Member, ChecklistItem } from '../types';
+import React, { useState, useEffect } from 'react';
+import { Task, TaskStatus, TaskPriority, Member, ChecklistItem, Role, TaskColorKey, TASK_COLORS, getTaskColor } from '../types';
+import { hasPermission } from '../permissions';
 import { RichTextEditor } from './RichTextEditor';
+import { startDevInTrae, getProjectPath } from '../utils/trae';
 import Markdown from 'react-markdown';
 import {
   ArrowLeft,
@@ -28,11 +30,14 @@ import {
   Pause,
   CheckCircle2,
   Edit3,
+  Palette,
+  Lock,
 } from 'lucide-react';
 
 interface TaskDetailPageProps {
   task: Task;
   members: Member[];
+  roles: Role[];
   currentMember: Member;
   projectName?: string;
   onBack: () => void;
@@ -44,6 +49,7 @@ interface TaskDetailPageProps {
 export const TaskDetailPage: React.FC<TaskDetailPageProps> = ({
   task,
   members,
+  roles,
   currentMember,
   projectName = '项目',
   onBack,
@@ -53,6 +59,9 @@ export const TaskDetailPage: React.FC<TaskDetailPageProps> = ({
 }) => {
   const [activeTab, setActiveTab] = useState<'comments' | 'activities'>('comments');
   const [newChecklistTitle, setNewChecklistTitle] = useState('');
+  const [newSubtaskAssignee, setNewSubtaskAssignee] = useState('');
+  const [editingChecklistId, setEditingChecklistId] = useState<string | null>(null);
+  const [editingChecklistTitle, setEditingChecklistTitle] = useState('');
   const [newCommentText, setNewCommentText] = useState('');
   const [isEditingTitle, setIsEditingTitle] = useState(false);
   const [titleText, setTitleText] = useState(task.title);
@@ -60,6 +69,13 @@ export const TaskDetailPage: React.FC<TaskDetailPageProps> = ({
   const [isDecomposing, setIsDecomposing] = useState(false);
   const [newTagInput, setNewTagInput] = useState('');
   const [isEditing, setIsEditing] = useState(false);
+  const [showCompleteModal, setShowCompleteModal] = useState(false);
+
+  // 弹窗显示时禁止背景滚动
+  useEffect(() => {
+    document.body.style.overflow = showCompleteModal ? 'hidden' : '';
+    return () => { document.body.style.overflow = ''; };
+  }, [showCompleteModal]);
 
   const checklist = task.checklist || [];
   const comments = task.comments || [];
@@ -72,6 +88,17 @@ export const TaskDetailPage: React.FC<TaskDetailPageProps> = ({
   const checklistPercent =
     totalChecklist > 0 ? Math.round((completedChecklist / totalChecklist) * 100) : 0;
 
+  // 权限判断:管理员或子任务负责人才能勾选完成
+  const canToggleChecklist = (item: ChecklistItem) => {
+    return currentMember.isAdmin || item.assigneeId === currentMember.id || task.reporterId === currentMember.id;
+  };
+
+  // 权限判断:是否有指派任务权限
+  const canAssignTask = hasPermission(currentMember, 'assign_task', roles);
+
+  // 操作权限：admin/PM 可操作所有任务；普通用户仅能操作自己是经办人的任务（报告人只读）
+  const canEditTask = canAssignTask || (task.assigneeIds?.includes(currentMember.id) ?? false);
+
   // Copy Task Link
   const handleCopyLink = () => {
     navigator.clipboard?.writeText(window.location.href);
@@ -81,10 +108,22 @@ export const TaskDetailPage: React.FC<TaskDetailPageProps> = ({
 
   // Toggle Checklist Item
   const handleToggleChecklist = (checkId: string) => {
+    const targetItem = checklist.find((item) => item.id === checkId);
+    if (!targetItem) return;
+
+    // 权限检查:非管理员且非本人子任务不能操作
+    if (!canToggleChecklist(targetItem)) return;
+
+    const willComplete = !targetItem.completed;
     const updatedChecklist = checklist.map((item) =>
-      item.id === checkId ? { ...item, completed: !item.completed } : item
+      item.id === checkId ? { ...item, completed: willComplete } : item
     );
     onUpdateTask({ checklist: updatedChecklist });
+
+    // 勾选完成后,如果全部子任务完成且主任务未完结,弹出完结确认
+    if (willComplete && updatedChecklist.length > 0 && updatedChecklist.every((item) => item.completed) && task.status !== 'done') {
+      setShowCompleteModal(true);
+    }
   };
 
   // Add Checklist Item
@@ -96,15 +135,54 @@ export const TaskDetailPage: React.FC<TaskDetailPageProps> = ({
       id: `chk_${Date.now()}`,
       title: newChecklistTitle.trim(),
       completed: false,
+      assigneeId: newSubtaskAssignee || undefined,
     };
-    onUpdateTask({ checklist: [...checklist, newItem] });
+    // 自动将子任务负责人合并到主任务经办人列表
+    const updatedAssigneeIds = newSubtaskAssignee && !assigneeIds.includes(newSubtaskAssignee)
+      ? [...assigneeIds, newSubtaskAssignee]
+      : assigneeIds;
+    onUpdateTask({ checklist: [...checklist, newItem], assigneeIds: updatedAssigneeIds });
     setNewChecklistTitle('');
+    setNewSubtaskAssignee('');
   };
 
   // Delete Checklist Item
   const handleDeleteChecklistItem = (checkId: string) => {
     const updatedChecklist = checklist.filter((item) => item.id !== checkId);
     onUpdateTask({ checklist: updatedChecklist });
+  };
+
+  // Edit Checklist Item Title
+  const handleStartEditChecklist = (item: ChecklistItem) => {
+    setEditingChecklistId(item.id);
+    setEditingChecklistTitle(item.title);
+  };
+
+  const handleSaveChecklistTitle = () => {
+    if (!editingChecklistId) return;
+    const trimmed = editingChecklistTitle.trim();
+    if (!trimmed) {
+      setEditingChecklistId(null);
+      return;
+    }
+    const updatedChecklist = checklist.map((item) =>
+      item.id === editingChecklistId ? { ...item, title: trimmed } : item
+    );
+    onUpdateTask({ checklist: updatedChecklist });
+    setEditingChecklistId(null);
+    setEditingChecklistTitle('');
+  };
+
+  // Update Checklist Item Assignee
+  const handleUpdateChecklistAssignee = (checkId: string, assigneeId: string) => {
+    const updatedChecklist = checklist.map((item) =>
+      item.id === checkId ? { ...item, assigneeId: assigneeId || undefined } : item
+    );
+    // 自动将新指派人员合并到主任务经办人列表
+    const updatedAssigneeIds = assigneeId && !assigneeIds.includes(assigneeId)
+      ? [...assigneeIds, assigneeId]
+      : assigneeIds;
+    onUpdateTask({ checklist: updatedChecklist, assigneeIds: updatedAssigneeIds });
   };
 
   // Submit Comment
@@ -152,10 +230,14 @@ export const TaskDetailPage: React.FC<TaskDetailPageProps> = ({
         body: JSON.stringify({ goal: `${task.title}: ${task.description}` }),
       });
       const data = await res.json();
+      if (!res.ok) {
+        console.error('AI Decompose error:', data.error);
+        return;
+      }
       if (data.checklist && data.checklist.length > 0) {
-        const newItems = data.checklist.map((itemTitle: string, idx: number) => ({
+        const newItems = data.checklist.map((item: any, idx: number) => ({
           id: `chk_ai_${Date.now()}_${idx}`,
-          title: itemTitle,
+          title: typeof item === 'string' ? item : item.title,
           completed: false,
         }));
         onUpdateTask({ checklist: [...checklist, ...newItems] });
@@ -174,7 +256,7 @@ export const TaskDetailPage: React.FC<TaskDetailPageProps> = ({
     backlog: { label: 'Backlog 积压', cls: 'bg-slate-100 text-slate-600 border-slate-200' },
     todo: { label: '待办 (To Do)', cls: 'bg-blue-50 text-blue-700 border-blue-200' },
     in_progress: { label: '进行中 (In Progress)', cls: 'bg-amber-50 text-amber-700 border-amber-200' },
-    review: { label: '代码评审 (Code Review)', cls: 'bg-purple-50 text-purple-700 border-purple-200' },
+    review: { label: '测试 (Test)', cls: 'bg-purple-50 text-purple-700 border-purple-200' },
     done: { label: '已完成 (Done)', cls: 'bg-emerald-50 text-emerald-700 border-emerald-200' },
   };
 
@@ -186,13 +268,24 @@ export const TaskDetailPage: React.FC<TaskDetailPageProps> = ({
     low: { label: '⚪ 低级 (Low)', cls: 'bg-slate-50 text-slate-600 border-slate-200' },
   };
 
+  const taskColor = getTaskColor(task.color);
+
   // 操作栏状态按钮可见性
   const showStart = task.status === 'todo' || task.status === 'backlog';
   const showPause = task.status === 'in_progress';
   const showComplete = task.status !== 'done';
   const showFlowToTest = task.status !== 'review' && task.status !== 'done';
 
-  const handleStart = () => onUpdateTask({ status: 'in_progress' });
+  const handleStart = () => {
+    onUpdateTask({ status: 'in_progress' });
+    const projectPath = getProjectPath(task.projectId);
+    console.log('[startDev] projectId=', task.projectId, 'projectPath=', projectPath);
+    if (projectPath) {
+      startDevInTrae(projectPath);
+    } else {
+      console.warn('[startDev] 未配置项目本地路径,请先通过 setProjectPath(projectId, path) 设置');
+    }
+  };
   const handlePause = () => onUpdateTask({ status: 'todo' });
   const handleComplete = () => onUpdateTask({ status: 'done' });
   const handleFlowToTest = () => {
@@ -220,6 +313,12 @@ export const TaskDetailPage: React.FC<TaskDetailPageProps> = ({
               <FolderKanban className="w-3.5 h-3.5 text-slate-500" />
               <span className="font-medium text-slate-600">{projectName}</span>
               <ChevronRight className="w-3.5 h-3.5" />
+              {task.color && task.color !== 'none' && (
+                <span
+                  className={`w-2.5 h-2.5 rounded-full ${taskColor.bar} ring-2 ring-white shadow-2xs`}
+                  title={`颜色标记: ${taskColor.label}`}
+                />
+              )}
               <span className="font-mono font-bold text-emerald-700 bg-emerald-50 border border-emerald-200 px-2 py-0.5 rounded-md">
                 {task.id}
               </span>
@@ -229,18 +328,18 @@ export const TaskDetailPage: React.FC<TaskDetailPageProps> = ({
           {/* Right: Quick Action Buttons */}
           <div className="flex items-center gap-2">
             {/* 核心快捷操作:开发完成提交测试 */}
-            {showFlowToTest && (
+            {showFlowToTest && canEditTask && (
               <button
                 onClick={handleFlowToTest}
                 className="flex items-center gap-1.5 bg-indigo-600 hover:bg-indigo-500 text-white px-3.5 py-1.5 rounded-xl text-xs font-bold transition-all shadow-xs cursor-pointer"
-                title="开发完成，自动流转至测试/代码评审并转交测试负责人"
+                title="开发完成，自动流转至测试并转交测试负责人"
               >
                 <span>🚀 开发完成，提交测试</span>
               </button>
             )}
 
             {/* 主操作:状态流转(开始 / 暂停 / 完成) */}
-            {showStart && (
+            {showStart && canEditTask && (
               <button
                 onClick={handleStart}
                 className="flex items-center gap-1.5 bg-amber-50 hover:bg-amber-100 border border-amber-200 text-amber-800 px-3 py-1.5 rounded-xl text-xs font-bold transition-all cursor-pointer"
@@ -250,7 +349,7 @@ export const TaskDetailPage: React.FC<TaskDetailPageProps> = ({
               </button>
             )}
 
-            {showPause && (
+            {showPause && canEditTask && (
               <button
                 onClick={handlePause}
                 className="flex items-center gap-1.5 bg-slate-100 hover:bg-slate-200 border border-slate-200 text-slate-700 px-3 py-1.5 rounded-xl text-xs font-bold transition-all cursor-pointer"
@@ -260,7 +359,7 @@ export const TaskDetailPage: React.FC<TaskDetailPageProps> = ({
               </button>
             )}
 
-            {showComplete && (
+            {showComplete && canEditTask && (
               <button
                 onClick={handleComplete}
                 className="flex items-center gap-1.5 bg-emerald-50 hover:bg-emerald-100 border border-emerald-200 text-emerald-800 px-3 py-1.5 rounded-xl text-xs font-bold transition-all cursor-pointer"
@@ -274,11 +373,13 @@ export const TaskDetailPage: React.FC<TaskDetailPageProps> = ({
 
             {/* 次操作:编辑 / 完成编辑 */}
             <button
-              onClick={() => setIsEditing((v) => !v)}
-              className={`flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-bold transition-all cursor-pointer border ${
+              onClick={() => canEditTask && setIsEditing((v) => !v)}
+              disabled={!canEditTask}
+              className={`flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-bold transition-all border ${
+                !canEditTask ? 'cursor-not-allowed opacity-40 bg-slate-100 text-slate-400 border-slate-200' :
                 isEditing
-                  ? 'bg-emerald-600 hover:bg-emerald-500 text-white border-emerald-600 shadow-xs'
-                  : 'bg-white hover:bg-slate-50 text-slate-700 border-slate-200'
+                  ? 'bg-emerald-600 hover:bg-emerald-500 text-white border-emerald-600 shadow-xs cursor-pointer'
+                  : 'bg-white hover:bg-slate-50 text-slate-700 border-slate-200 cursor-pointer'
               }`}
             >
               <Edit3 className="w-3.5 h-3.5" />
@@ -328,6 +429,16 @@ export const TaskDetailPage: React.FC<TaskDetailPageProps> = ({
         </div>
       </div>
 
+      {/* 只读模式提示横幅 */}
+      {!canEditTask && (
+        <div className="bg-amber-50 border-b border-amber-200 px-4 sm:px-6 py-2">
+          <div className="max-w-7xl mx-auto flex items-center gap-2 text-xs text-amber-800 font-medium">
+            <Lock className="w-3.5 h-3.5 shrink-0" />
+            <span>只读模式：你不是此任务的经办人，仅可查看不可编辑。如需修改请联系经办人或管理员。</span>
+          </div>
+        </div>
+      )}
+
       {/* Main Container */}
       <div className="max-w-7xl mx-auto px-4 sm:px-6 pt-6">
         
@@ -373,11 +484,11 @@ export const TaskDetailPage: React.FC<TaskDetailPageProps> = ({
                   />
                 ) : (
                   <h1
-                    onClick={() => isEditing && setIsEditingTitle(true)}
+                    onClick={() => canEditTask && isEditing && setIsEditingTitle(true)}
                     className={`text-2xl sm:text-3xl font-extrabold text-slate-900 leading-tight ${
-                      isEditing ? 'hover:text-emerald-700 transition-colors cursor-pointer' : 'cursor-default'
+                      canEditTask && isEditing ? 'hover:text-emerald-700 transition-colors cursor-pointer' : 'cursor-default'
                     }`}
-                    title={isEditing ? '点击可编辑标题' : ''}
+                    title={canEditTask && isEditing ? '点击可编辑标题' : ''}
                   >
                     {task.title}
                   </h1>
@@ -421,10 +532,10 @@ export const TaskDetailPage: React.FC<TaskDetailPageProps> = ({
 
               <RichTextEditor
                 value={task.description}
-                onChange={(newDesc) => onUpdateTask({ description: newDesc })}
+                onChange={(newDesc) => canEditTask && onUpdateTask({ description: newDesc })}
                 placeholder="详细说明此任务的实施目标、技术规格、交互原型、接口约定或验收标准..."
                 minHeight="280px"
-                readOnly={!isEditing}
+                readOnly={!isEditing || !canEditTask}
               />
             </div>
 
@@ -452,62 +563,131 @@ export const TaskDetailPage: React.FC<TaskDetailPageProps> = ({
 
               {/* Checklist Items */}
               <div className="space-y-2">
-                {checklist.map((item) => (
-                  <div
-                    key={item.id}
-                    className={`flex items-center justify-between p-3 rounded-2xl border transition-all ${
-                      item.completed
-                        ? 'bg-emerald-50/40 border-emerald-200/60 text-slate-400 line-through'
-                        : 'bg-slate-50/60 border-slate-200 text-slate-800'
-                    }`}
-                  >
-                    <label className={`flex items-center gap-3 flex-1 ${isEditing ? 'cursor-pointer' : 'cursor-default'}`}>
-                      <input
-                        type="checkbox"
-                        checked={item.completed}
-                        onChange={() => handleToggleChecklist(item.id)}
-                        disabled={!isEditing}
-                        className="w-4 h-4 rounded text-emerald-600 focus:ring-emerald-500 cursor-pointer"
-                      />
-                      <span className="text-xs font-medium leading-relaxed">{item.title}</span>
-                    </label>
-                    {isEditing && (
-                      <button
-                        type="button"
-                        onClick={() => handleDeleteChecklistItem(item.id)}
-                        className="p-1 text-slate-400 hover:text-rose-600 transition-colors cursor-pointer"
-                      >
-                        <Trash2 className="w-3.5 h-3.5" />
-                      </button>
-                    )}
-                  </div>
-                ))}
+                {checklist.map((item) => {
+                  const isEditingThis = editingChecklistId === item.id;
+                  const canToggle = canToggleChecklist(item);
+                  return (
+                    <div
+                      key={item.id}
+                      className={`flex items-start gap-2 p-3 rounded-2xl border transition-all ${
+                        item.completed
+                          ? 'bg-emerald-50/40 border-emerald-200/60 text-slate-400'
+                          : 'bg-slate-50/60 border-slate-200 text-slate-800'
+                      }`}
+                    >
+                      <label className={`flex items-center gap-3 flex-1 min-w-0 pt-0.5 ${canToggle ? 'cursor-pointer' : 'cursor-not-allowed'}`}>
+                        <input
+                          type="checkbox"
+                          checked={item.completed}
+                          onChange={() => handleToggleChecklist(item.id)}
+                          disabled={!canToggle}
+                          className={`w-4 h-4 rounded text-emerald-600 focus:ring-emerald-500 shrink-0 ${canToggle ? 'cursor-pointer' : 'cursor-not-allowed opacity-50'}`}
+                        />
+                        {isEditingThis ? (
+                          <input
+                            type="text"
+                            value={editingChecklistTitle}
+                            onChange={(e) => setEditingChecklistTitle(e.target.value)}
+                            onBlur={handleSaveChecklistTitle}
+                            onKeyDown={(e) => {
+                              if (e.key === 'Enter') handleSaveChecklistTitle();
+                              if (e.key === 'Escape') { setEditingChecklistId(null); setEditingChecklistTitle(''); }
+                            }}
+                            autoFocus
+                            className={`flex-1 bg-white border border-emerald-300 rounded-lg px-2 py-1 text-xs font-medium focus:outline-none focus:border-emerald-500 shadow-xs ${
+                              item.completed ? 'line-through text-slate-400' : 'text-slate-800'
+                            }`}
+                          />
+                        ) : (
+                          <span
+                            className={`text-xs font-medium leading-relaxed flex-1 ${item.completed ? 'line-through' : ''}`}
+                            onDoubleClick={() => handleStartEditChecklist(item)}
+                          >
+                            {item.title}
+                          </span>
+                        )}
+                      </label>
 
-                {checklist.length === 0 && !isEditing && (
+                      {/* Assignee */}
+                      <div className="flex items-center shrink-0 pt-0.5">
+                        <select
+                          value={item.assigneeId || ''}
+                          onChange={(e) => handleUpdateChecklistAssignee(item.id, e.target.value)}
+                          disabled={!canAssignTask}
+                          className={`text-[10px] border rounded-lg px-1.5 py-1 bg-white focus:outline-none focus:border-emerald-400 ${
+                            canAssignTask ? 'cursor-pointer' : 'cursor-not-allowed opacity-60'
+                          } ${
+                            item.assigneeId ? 'text-emerald-800 border-emerald-200 font-semibold' : 'text-slate-400 border-slate-200'
+                          }`}
+                        >
+                          <option value="">未指派</option>
+                          {members.map((m) => (
+                            <option key={m.id} value={m.id}>{m.name}</option>
+                          ))}
+                        </select>
+                      </div>
+
+                      {/* Actions */}
+                      <div className="flex items-center gap-0.5 shrink-0 pt-0.5">
+                        {!isEditingThis && (
+                          <button
+                            type="button"
+                            onClick={() => handleStartEditChecklist(item)}
+                            className="p-1 text-slate-400 hover:text-emerald-600 transition-colors cursor-pointer"
+                            title="编辑标题"
+                          >
+                            <Edit3 className="w-3.5 h-3.5" />
+                          </button>
+                        )}
+                        <button
+                          type="button"
+                          onClick={() => handleDeleteChecklistItem(item.id)}
+                          className="p-1 text-slate-400 hover:text-rose-600 transition-colors cursor-pointer"
+                          title="删除"
+                        >
+                          <Trash2 className="w-3.5 h-3.5" />
+                        </button>
+                      </div>
+                    </div>
+                  );
+                })}
+
+                {checklist.length === 0 && (
                   <p className="text-xs text-slate-400 italic text-center py-3">暂无子任务拆解项</p>
                 )}
               </div>
 
-              {/* Add New Subtask Form (edit mode only) */}
-              {isEditing && (
+              {/* Add New Subtask Form */}
               <form onSubmit={handleAddChecklistItem} className="flex gap-2 pt-2">
                 <input
                   type="text"
-                  placeholder="新增子任务拆解项..."
+                  placeholder="新增子任务..."
                   value={newChecklistTitle}
                   onChange={(e) => setNewChecklistTitle(e.target.value)}
                   className="flex-1 bg-slate-50 border border-slate-200 rounded-xl px-3.5 py-2 text-xs text-slate-800 placeholder-slate-400 focus:outline-none focus:border-emerald-500 shadow-2xs"
                 />
+                <select
+                  value={newSubtaskAssignee}
+                  onChange={(e) => setNewSubtaskAssignee(e.target.value)}
+                  disabled={!canAssignTask}
+                  className={`bg-slate-50 border border-slate-200 rounded-xl px-2.5 py-2 text-xs text-slate-700 focus:outline-none focus:border-emerald-500 shrink-0 ${
+                    canAssignTask ? 'cursor-pointer' : 'cursor-not-allowed opacity-60'
+                  }`}
+                >
+                  <option value="">指派人员</option>
+                  {members.map((m) => (
+                    <option key={m.id} value={m.id}>{m.name}</option>
+                  ))}
+                </select>
                 <button
                   type="submit"
-                  disabled={!newChecklistTitle.trim()}
+                  disabled={!canEditTask || !newChecklistTitle.trim()}
                   className="bg-emerald-600 hover:bg-emerald-500 text-white px-4 py-2 rounded-xl text-xs font-semibold flex items-center gap-1 shadow-xs disabled:opacity-40 transition-all cursor-pointer shrink-0"
                 >
                   <Plus className="w-4 h-4" />
-                  <span>添加项</span>
+                  <span>添加</span>
                 </button>
               </form>
-              )}
             </div>
 
             {/* Discussions & Audit Trail */}
@@ -596,7 +776,7 @@ export const TaskDetailPage: React.FC<TaskDetailPageProps> = ({
                       />
                       <button
                         type="submit"
-                        disabled={!newCommentText.trim()}
+                        disabled={!canEditTask || !newCommentText.trim()}
                         className="bg-emerald-600 hover:bg-emerald-500 text-white px-4 py-2.5 rounded-2xl text-xs font-bold flex items-center gap-1.5 shadow-xs disabled:opacity-40 transition-all cursor-pointer shrink-0"
                       >
                         <Send className="w-3.5 h-3.5" />
@@ -662,12 +842,13 @@ export const TaskDetailPage: React.FC<TaskDetailPageProps> = ({
                 <select
                   value={task.status}
                   onChange={(e) => onUpdateTask({ status: e.target.value as TaskStatus })}
-                  className="w-full bg-slate-50 border border-slate-200 rounded-xl p-2.5 text-xs font-semibold text-slate-800 focus:outline-none focus:border-emerald-500 cursor-pointer shadow-2xs"
+                  disabled={!canEditTask}
+                  className={`w-full bg-slate-50 border border-slate-200 rounded-xl p-2.5 text-xs font-semibold text-slate-800 focus:outline-none focus:border-emerald-500 shadow-2xs ${canEditTask ? 'cursor-pointer' : 'cursor-not-allowed opacity-60'}`}
                 >
                   <option value="backlog">Backlog 积压</option>
                   <option value="todo">待办 (To Do)</option>
                   <option value="in_progress">进行中 (In Progress)</option>
-                  <option value="review">代码评审 (Code Review)</option>
+                  <option value="review">测试 (Test)</option>
                   <option value="done">已完成 (Done)</option>
                 </select>
               </div>
@@ -679,13 +860,45 @@ export const TaskDetailPage: React.FC<TaskDetailPageProps> = ({
                 <select
                   value={task.priority}
                   onChange={(e) => onUpdateTask({ priority: e.target.value as TaskPriority })}
-                  className="w-full bg-slate-50 border border-slate-200 rounded-xl p-2.5 text-xs font-semibold text-slate-800 focus:outline-none focus:border-emerald-500 cursor-pointer shadow-2xs"
+                  disabled={!canEditTask}
+                  className={`w-full bg-slate-50 border border-slate-200 rounded-xl p-2.5 text-xs font-semibold text-slate-800 focus:outline-none focus:border-emerald-500 shadow-2xs ${canEditTask ? 'cursor-pointer' : 'cursor-not-allowed opacity-60'}`}
                 >
                   <option value="urgent">🔴 紧急 (Urgent)</option>
                   <option value="high">🟠 高级 (High)</option>
                   <option value="medium">🔵 中等 (Medium)</option>
                   <option value="low">⚪ 低级 (Low)</option>
                 </select>
+              </div>
+
+              {/* 任务颜色标记 */}
+              <div>
+                <label className="text-xs font-bold text-slate-700 block mb-1.5 uppercase tracking-wider flex items-center gap-1.5">
+                  <Palette className="w-3.5 h-3.5 text-emerald-600" />
+                  <span>颜色标记</span>
+                </label>
+                <div className="flex flex-wrap gap-1.5 bg-slate-50 border border-slate-200 rounded-xl p-2 shadow-2xs">
+                  {TASK_COLORS.map((opt) => {
+                    const isSelected = (task.color || 'none') === opt.key;
+                    return (
+                      <button
+                        key={opt.key}
+                        type="button"
+                        onClick={() => canEditTask && onUpdateTask({ color: opt.key } as Partial<Task>)}
+                        title={canEditTask ? opt.label : '无操作权限'}
+                        className={`relative w-5 h-5 rounded-full ${opt.bar} border-2 transition-all ${canEditTask ? 'cursor-pointer hover:scale-110' : 'cursor-not-allowed opacity-50'} ${
+                          isSelected ? 'ring-2 ring-offset-1 ring-emerald-500 border-white' : 'border-white shadow-2xs'
+                        }`}
+                      >
+                        {opt.key === 'none' && (
+                          <span className="absolute inset-0 flex items-center justify-center text-[10px] text-slate-500 font-bold">/</span>
+                        )}
+                      </button>
+                    );
+                  })}
+                  <span className="ml-auto self-center text-[11px] text-slate-500 font-medium pr-1">
+                    {taskColor.label}
+                  </span>
+                </div>
               </div>
 
             </div>
@@ -697,7 +910,7 @@ export const TaskDetailPage: React.FC<TaskDetailPageProps> = ({
                 指派经办人 ({assigneeIds.length})
               </label>
               <div className="flex flex-wrap gap-2 max-h-48 overflow-y-auto p-1">
-                {isEditing
+                {isEditing && canAssignTask
                   ? members.map((m) => {
                       const isSelected = assigneeIds.includes(m.id);
                       return (
@@ -932,6 +1145,40 @@ export const TaskDetailPage: React.FC<TaskDetailPageProps> = ({
         </div>
 
       </div>
+
+      {/* 完结主任务确认弹窗 */}
+      {showCompleteModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm" onClick={() => setShowCompleteModal(false)}>
+          <div className="bg-white rounded-3xl shadow-2xl p-6 max-w-sm w-full mx-4 space-y-4" onClick={(e) => e.stopPropagation()}>
+            <div className="flex items-center gap-3">
+              <div className="w-10 h-10 rounded-full bg-emerald-100 flex items-center justify-center shrink-0">
+                <CheckCircle2 className="w-5 h-5 text-emerald-600" />
+              </div>
+              <div>
+                <h3 className="text-sm font-bold text-slate-900">所有子任务已完成</h3>
+                <p className="text-xs text-slate-500 mt-0.5">是否将主任务标记为已完结？</p>
+              </div>
+            </div>
+            <div className="flex gap-2 pt-2">
+              <button
+                onClick={() => setShowCompleteModal(false)}
+                className="flex-1 bg-slate-100 hover:bg-slate-200 text-slate-700 px-4 py-2.5 rounded-xl text-xs font-semibold transition-colors cursor-pointer"
+              >
+                暂不
+              </button>
+              <button
+                onClick={() => {
+                  onUpdateTask({ status: 'done' });
+                  setShowCompleteModal(false);
+                }}
+                className="flex-1 bg-emerald-600 hover:bg-emerald-500 text-white px-4 py-2.5 rounded-xl text-xs font-semibold transition-colors cursor-pointer shadow-xs"
+              >
+                确认完结
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
     </div>
   );
