@@ -74,6 +74,15 @@ export interface Member {
   workloadCount?: number;
   isAdmin?: boolean;
   zentaoAccount?: string;
+  // 从禅道同步的账号资料
+  zentaoUserId?: string;
+  zentaoRole?: string;
+  zentaoDept?: string;
+  phone?: string;
+  weixin?: string;
+  gender?: 'm' | 'f' | '';
+  // 最近一次禅道同步时间
+  zentaoSyncedAt?: string;
 }
 
 export interface ChecklistItem {
@@ -101,6 +110,26 @@ export interface TaskActivity {
   timestamp: string;
 }
 
+// 开发反馈：Agent / 开发者完成开发后回写的结构化结果
+export interface TaskFeedback {
+  id: string;
+  taskId: string;
+  authorId: string;
+  // 完成内容总结
+  summary: string;
+  // 修改的文件清单
+  changedFiles?: string[];
+  // Git commit hash
+  commitHash?: string;
+  // PR / MR 链接
+  prUrl?: string;
+  // 新增/升级的依赖
+  dependencies?: string[];
+  // 需要团队知悉的注意事项
+  notes?: string;
+  createdAt: string;
+}
+
 export interface Task {
   id: string;
   title: string;
@@ -118,12 +147,16 @@ export interface Task {
   checklist: ChecklistItem[];
   comments: TaskComment[];
   activities: TaskActivity[];
+  // 开发反馈记录（Agent / 开发者回写的结构化结果）
+  feedbacks?: TaskFeedback[];
   attachmentsCount: number;
   testerId?: string;
   autoFlowToTest?: boolean;
   completeDevAndFlow?: boolean;
   // 任务颜色标记（可选）
   color?: string;
+  // 来源禅道账号（从禅道同步的任务才有，用于多账号隔离）
+  zentaoAccount?: string;
   createdAt: string;
   updatedAt: string;
 }

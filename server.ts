@@ -11,7 +11,7 @@ import {
   INITIAL_MESSAGES,
   INITIAL_NOTIFICATIONS,
 } from './src/mockData';
-import { Task, ChatMessage, TaskComment, TaskActivity, NotificationItem, Project, Member, Role } from './src/types';
+import { Task, ChatMessage, TaskComment, TaskActivity, TaskFeedback, NotificationItem, Project, Member, Role } from './src/types';
 
 const app = express();
 const PORT = 3000;
@@ -522,7 +522,7 @@ app.put('/api/tasks/:id', (req, res) => {
           taskId: id,
           authorId,
           content: updates.activityNote,
-          timestamp: nowStr,
+          createdAt: nowStr,
         };
         const comments = [...(t.comments || []), newComment];
         updates.comments = comments;
@@ -537,6 +537,34 @@ app.put('/api/tasks/:id', (req, res) => {
       }
       // 清理仅供后端消费的字段
       delete updates.activityNote;
+
+      // 结构化开发反馈：Agent 回写的开发结果，存入 feedbacks 数组
+      if (updates.devFeedback) {
+        const fb = updates.devFeedback;
+        const newFeedback: TaskFeedback = {
+          id: `fb_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`,
+          taskId: id,
+          authorId: fb.authorId || authorId,
+          summary: fb.summary || '',
+          changedFiles: Array.isArray(fb.changedFiles) ? fb.changedFiles : [],
+          commitHash: fb.commitHash || undefined,
+          prUrl: fb.prUrl || undefined,
+          dependencies: Array.isArray(fb.dependencies) ? fb.dependencies : [],
+          notes: fb.notes || undefined,
+          createdAt: nowStr,
+        };
+        const feedbacks = [...(t.feedbacks || []), newFeedback];
+        updates.feedbacks = feedbacks;
+        activities.unshift({
+          id: `act_${Date.now()}`,
+          taskId: id,
+          authorId: newFeedback.authorId,
+          action: '提交了开发反馈',
+          details: fb.summary ? fb.summary.slice(0, 80) : '开发结果已回写',
+          timestamp: nowStr,
+        });
+      }
+      delete updates.devFeedback;
 
       // 清除辅助请求标记避免多存
       delete updates.completeDevAndFlow;
@@ -611,6 +639,58 @@ app.post('/api/tasks/:id/comments', (req, res) => {
   res.json({ success: true, comment: newComment, task: targetTask, tasks, notifications });
 });
 
+// Submit Dev Feedback (结构化开发反馈，供 MCP / Agent 调用)
+app.post('/api/tasks/:id/feedback', (req, res) => {
+  const { id } = req.params;
+  const { authorId, summary, changedFiles, commitHash, prUrl, dependencies, notes } = req.body || {};
+  const nowStr = new Date().toISOString().replace('T', ' ').substring(0, 16);
+
+  if (!summary || !summary.trim()) {
+    return res.status(400).json({ error: 'summary 不能为空' });
+  }
+
+  const actorId = authorId || 'usr_alex';
+  const newFeedback: TaskFeedback = {
+    id: `fb_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`,
+    taskId: id,
+    authorId: actorId,
+    summary: summary.trim(),
+    changedFiles: Array.isArray(changedFiles) ? changedFiles : [],
+    commitHash: commitHash || undefined,
+    prUrl: prUrl || undefined,
+    dependencies: Array.isArray(dependencies) ? dependencies : [],
+    notes: notes || undefined,
+    createdAt: nowStr,
+  };
+
+  let updatedTask: Task | null = null;
+  tasks = tasks.map((t) => {
+    if (t.id === id) {
+      const feedbacks = [...(t.feedbacks || []), newFeedback];
+      const activities = [
+        {
+          id: `act_${Date.now()}`,
+          taskId: id,
+          authorId: actorId,
+          action: '提交了开发反馈',
+          details: summary.slice(0, 80),
+          timestamp: nowStr,
+        },
+        ...t.activities,
+      ];
+      updatedTask = { ...t, feedbacks, activities, updatedAt: nowStr };
+      return updatedTask;
+    }
+    return t;
+  });
+
+  if (!updatedTask) {
+    return res.status(404).json({ error: `任务 ${id} 不存在` });
+  }
+
+  res.json({ success: true, feedback: newFeedback, task: updatedTask, tasks });
+});
+
 // Post Channel Message
 app.post('/api/channels/:id/messages', async (req, res) => {
   const { id } = req.params;
@@ -632,7 +712,7 @@ app.post('/api/channels/:id/messages', async (req, res) => {
   const mentionsCopilot = content.toLowerCase().includes('@copilot') || content.includes('@ai') || content.includes('小助手');
 
   if (mentionsCopilot) {
-    let aiAnswer = '我是 TaskSync AI 协同助手。我已经分析了当前项目的任务状态，有什么需要我帮忙一键拆解或总结站会的吗？';
+    let aiAnswer = '我是 牛磨 AI 协同助手。我已经分析了当前项目的任务状态，有什么需要我帮忙一键拆解或总结站会的吗？';
 
     try {
       if (apiKeysByProvider[activeProvider]) {
@@ -895,13 +975,51 @@ const mapZentaoStatus = (status: string): string => {
   }
 };
 
-// 禅道优先级(1-4) -> TaskSync 优先级
+// 禅道优先级(1-4) -> 牛磨 优先级
 const mapZentaoPriority = (pri: string | number): string => {
   const n = Number(pri);
   if (n === 1) return 'urgent';
   if (n === 2) return 'high';
   if (n === 3) return 'medium';
   return 'low';
+};
+
+// 禅道角色 -> 本地角色名与 roleId
+const mapZentaoRole = (ztRole: string, isAdmin: boolean): { role: string; roleId: string } => {
+  if (isAdmin) return { role: '系统管理员', roleId: 'role_admin' };
+  const map: Record<string, { role: string; roleId: string }> = {
+    dev: { role: '开发工程师', roleId: 'role_dev' },
+    qa: { role: '测试工程师', roleId: 'role_dev' },
+    pm: { role: '产品经理 (PM)', roleId: 'role_pm' },
+    po: { role: '产品经理 (PM)', roleId: 'role_pm' },
+    pd: { role: '产品经理 (PM)', roleId: 'role_pm' },
+    td: { role: '研发主管', roleId: 'role_pm' },
+    ui: { role: '设计师', roleId: 'role_designer' },
+    devops: { role: 'DevOps 工程师', roleId: 'role_devops' },
+    top: { role: '公司管理层', roleId: 'role_pm' },
+  };
+  return map[ztRole] || { role: '研发工程师', roleId: 'role_dev' };
+};
+
+/**
+ * 解析禅道登录响应，提取用户账号资料。
+ * 注意：禅道将用户信息放在顶层 `user` 字段（部分版本在 `data` 中），需同时兼容。
+ */
+const parseZentaoUser = (loginText: string): Record<string, any> | null => {
+  try {
+    const loginJson = JSON.parse(loginText);
+    if (loginJson.status === 'failed') return null;
+    // 优先取 user 字段，回退到 data（兼容不同禅道版本）
+    let u = loginJson.user;
+    if (!u && loginJson.data) {
+      u = typeof loginJson.data === 'string' ? JSON.parse(loginJson.data) : loginJson.data;
+      // 某些版本 data 内层还包一层 user
+      if (u?.user) u = u.user;
+    }
+    return u && typeof u === 'object' ? u : null;
+  } catch {
+    return null;
+  }
 };
 
 // 禅道操作动作 -> 中文描述
@@ -1011,15 +1129,10 @@ app.post('/api/zentao/sync', async (req, res) => {
     // 缓存 sid 供图片代理接口使用
     zentaoCachedSid = finalSid;
 
-    // 检查登录是否成功（返回内容包含用户信息或 load）
-    if (!loginText.includes('"account"') && !loginText.includes('load')) {
-      // 尝试另一种检测方式：如果返回了用户信息 JSON
-      try {
-        const loginJson = JSON.parse(loginText);
-        if (loginJson.status === 'failed') {
-          return res.status(401).json({ error: '禅道登录失败，请检查账号密码' });
-        }
-      } catch {}
+    // 校验登录并解析账号资料
+    const ztUser = parseZentaoUser(loginText);
+    if (!ztUser) {
+      return res.status(401).json({ error: '禅道登录失败，请检查账号密码' });
     }
 
     // 步骤3: 获取任务数据
@@ -1091,9 +1204,21 @@ app.post('/api/zentao/sync', async (req, res) => {
 
     res.json({
       success: true,
-      memberName: account,
+      memberName: ztUser.realname || ztUser.nickname || account,
       taskCount: mappedTasks.length,
       tasks: mappedTasks,
+      // 同步到的禅道账号资料
+      account: {
+        zentaoAccount: account,
+        zentaoUserId: ztUser.id ? String(ztUser.id) : undefined,
+        realname: ztUser.realname || ztUser.nickname || account,
+        zentaoRole: ztUser.role || undefined,
+        dept: ztUser.dept ? String(ztUser.dept) : undefined,
+        email: ztUser.email || undefined,
+        phone: ztUser.mobile || ztUser.phone || undefined,
+        weixin: ztUser.weixin || undefined,
+        isAdmin: ztUser.admin === true,
+      },
     });
   } catch (err: any) {
     console.error('Zentao sync error:', err);
@@ -1126,6 +1251,10 @@ app.post('/api/zentao/import', (req, res) => {
         const existing = projects.find((p) => p.name === pName);
         if (existing) {
           projectId = existing.id;
+          // 复用已有项目时，把当前成员补入项目成员列表
+          if (memberId && !existing.memberIds.includes(memberId)) {
+            existing.memberIds = [...existing.memberIds, memberId];
+          }
         } else {
           // 创建新项目
           projectId = `zentao-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
@@ -1248,17 +1377,12 @@ app.post('/api/zentao/login', async (req, res) => {
     const finalSid = cookieMatch ? cookieMatch[1] : sessionID;
     zentaoCachedSid = finalSid;
 
-    // 尝试从登录返回中提取用户真实姓名
-    let zentaoRealName = account;
-    try {
-      const loginJson = JSON.parse(loginText);
-      if (loginJson.status === 'failed') {
-        return res.status(401).json({ error: '禅道登录失败，请检查账号密码' });
-      }
-      const userData = typeof loginJson.data === 'string' ? JSON.parse(loginJson.data) : loginJson.data;
-      if (userData?.realname) zentaoRealName = userData.realname;
-      else if (userData?.name) zentaoRealName = userData.name;
-    } catch {}
+    // 解析禅道账号资料（realname / role / dept / 联系方式等）
+    const ztUser = parseZentaoUser(loginText);
+    if (!ztUser) {
+      return res.status(401).json({ error: '禅道登录失败，请检查账号密码' });
+    }
+    const zentaoRealName = ztUser.realname || ztUser.nickname || account;
 
     // 步骤3: 获取任务列表
     const taskRes = await fetch(`${ZENTAO_BASE}/my-task.json`, {
@@ -1315,26 +1439,61 @@ app.post('/api/zentao/login', async (req, res) => {
       }
     }
 
-    // 步骤5: 匹配本地成员（先按 zentaoAccount，再按 realname）
+    // 步骤5: 匹配本地成员（优先 zentaoAccount，其次姓名精确匹配）
     let member = members.find((m) => m.zentaoAccount === account);
     if (!member && zentaoRealName !== account) {
-      member = members.find((m) => m.name.includes(zentaoRealName) || zentaoRealName.includes(m.name.split(' ')[0]));
+      // 仅做精确匹配：姓名完全相同或去掉英文括号后缀后相同，
+      // 避免「张琪」被模糊匹配到「张莎拉 (Sarah)」这类同姓成员
+      const normalize = (s: string) => s.replace(/\s*[（(].*?[)）]\s*/g, '').trim();
+      const target = normalize(zentaoRealName);
+      member = members.find((m) => normalize(m.name) === target);
     }
-    // 匹配不到则创建新成员
-    if (!member) {
-      const newMemberId = `usr_zt_${Date.now()}`;
+
+    // 从禅道账号资料构建同步字段
+    const syncedAt = new Date().toISOString().replace('T', ' ').substring(0, 16);
+    const mappedRole = mapZentaoRole(ztUser.role || '', ztUser.admin === true);
+    // 禅道头像为相对路径时需走图片代理，为空则用 initials 头像兜底
+    const ztAvatar = ztUser.avatar
+      ? (String(ztUser.avatar).startsWith('http')
+          ? String(ztUser.avatar)
+          : `/api/zentao/image?url=${encodeURIComponent(`http://124.70.211.186:7099${String(ztUser.avatar).startsWith('/') ? '' : '/'}${ztUser.avatar}`)}`)
+      : `https://api.dicebear.com/7.x/initials/svg?seed=${encodeURIComponent(zentaoRealName)}`;
+
+    const zentaoProfile = {
+      name: zentaoRealName,
+      role: mappedRole.role,
+      roleId: mappedRole.roleId,
+      email: ztUser.email || `${account}@zentao.sync`,
+      status: 'online' as const,
+      statusText: `禅道同步 · ${mappedRole.role}`,
+      workloadCount: mappedTasks.length,
+      isAdmin: ztUser.admin === true,
+      zentaoAccount: account,
+      zentaoUserId: ztUser.id ? String(ztUser.id) : undefined,
+      zentaoRole: ztUser.role || undefined,
+      zentaoDept: ztUser.dept ? String(ztUser.dept) : undefined,
+      phone: ztUser.mobile || ztUser.phone || undefined,
+      weixin: ztUser.weixin || undefined,
+      gender: (ztUser.gender === 'm' || ztUser.gender === 'f' ? ztUser.gender : '') as 'm' | 'f' | '',
+      zentaoSyncedAt: syncedAt,
+    };
+
+    if (member) {
+      // 已存在成员：同步最新禅道资料（保留本地已有头像，避免覆盖用户自定义头像）
+      const existing = member;
+      members = members.map((m) =>
+        m.id === existing.id
+          ? { ...m, ...zentaoProfile, avatar: m.avatar || ztAvatar }
+          : m
+      );
+      member = members.find((m) => m.id === existing.id)!;
+    } else {
+      // 匹配不到则创建新成员
       member = {
-        id: newMemberId,
-        name: zentaoRealName,
-        role: '研发工程师',
-        roleId: 'role_dev',
-        avatar: `https://api.dicebear.com/7.x/initials/svg?seed=${encodeURIComponent(zentaoRealName)}`,
+        id: `usr_zt_${Date.now()}`,
+        ...zentaoProfile,
+        avatar: ztAvatar,
         avatarBg: 'bg-indigo-600',
-        email: `${account}@zentao.sync`,
-        status: 'online',
-        statusText: '从禅道登录',
-        workloadCount: mappedTasks.length,
-        zentaoAccount: account,
       };
       members.push(member);
     }
@@ -1353,6 +1512,10 @@ app.post('/api/zentao/login', async (req, res) => {
         const existing = projects.find((p) => p.name === pName);
         if (existing) {
           projectId = existing.id;
+          // 同名项目被多个禅道账号共用时，补入当前登录成员
+          if (!existing.memberIds.includes(member!.id)) {
+            existing.memberIds = [...existing.memberIds, member!.id];
+          }
         } else {
           projectId = `zentao-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
           projects.push({
@@ -1370,6 +1533,11 @@ app.post('/api/zentao/login', async (req, res) => {
           title: zt.title, status: zt.status, priority: zt.priority, dueDate: zt.deadline,
           estimatedHours: parseFloat(zt.estimate) || 0, loggedHours: parseFloat(zt.consumed) || 0,
           tags: [zt.type, ...(zt.storyTitle ? [`需求: ${zt.storyTitle}`] : []), ...(zt.modulePath ? [`模块: ${zt.modulePath}`] : [])],
+          // 归属信息随当前登录账号更新，避免多账号下任务停留在首次导入者名下
+          assigneeIds: [member!.id],
+          reporterId: member!.id,
+          projectId,
+          zentaoAccount: account,
         });
         if (zt.desc || zt.storySpec) existingTask.description = buildZentaoDescription(zt);
         updatedCount++;
@@ -1402,6 +1570,7 @@ app.post('/api/zentao/login', async (req, res) => {
         loggedHours: parseFloat(zt.consumed) || 0,
         tags: [zt.type, ...(zt.storyTitle ? [`需求: ${zt.storyTitle}`] : []), ...(zt.modulePath ? [`模块: ${zt.modulePath}`] : [])],
         checklist: [], comments: [], activities: ztActivities, attachmentsCount: 0,
+        zentaoAccount: account,
         createdAt: zt.openedDate || now, updatedAt: zt.lastEditedDate || now,
       });
       importedCount++;
@@ -1414,6 +1583,21 @@ app.post('/api/zentao/login', async (req, res) => {
       taskCount: mappedTasks.length,
       imported: importedCount,
       updated: updatedCount,
+      // 回传同步到的禅道账号资料，供前端展示
+      account: {
+        zentaoAccount: account,
+        zentaoUserId: member.zentaoUserId,
+        realname: member.name,
+        role: member.role,
+        zentaoRole: member.zentaoRole,
+        dept: member.zentaoDept,
+        email: member.email,
+        phone: member.phone,
+        weixin: member.weixin,
+        isAdmin: member.isAdmin,
+        syncedAt: member.zentaoSyncedAt,
+      },
+      members,
     });
   } catch (err: any) {
     console.error('Zentao login error:', err);

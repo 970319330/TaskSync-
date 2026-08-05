@@ -141,7 +141,7 @@ export const ChatHub: React.FC<ChatHubProps> = ({
           <div className="flex-1 overflow-y-auto p-4 sm:p-5 space-y-4">
             {channelMessages.map((msg) => {
               const author = members.find((m) => m.id === msg.authorId) || {
-                name: msg.isAiResponse ? 'TaskSync Copilot' : '匿名成员',
+                name: msg.isAiResponse ? '牛磨 Copilot' : '匿名成员',
                 avatar: 'https://images.unsplash.com/photo-1618005182384-a83a8bd57fbe?auto=format&fit=crop&q=80&w=150',
                 role: 'AI 协同助手',
               };

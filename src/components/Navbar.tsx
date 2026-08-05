@@ -22,6 +22,7 @@ import {
 import { Project, Member, ViewMode, NotificationItem, Role } from '../types';
 import { hasPermission } from '../permissions';
 import { NotificationDropdown } from './NotificationDropdown';
+import logoUrl from '../assets/logo.png';
 
 interface NavbarProps {
   projects: Project[];
@@ -104,12 +105,14 @@ export const Navbar: React.FC<NavbarProps> = ({
         {/* Left: Brand Logo & Project Switcher */}
         <div className="flex items-center gap-3 sm:gap-6 shrink-0">
           <div className="flex items-center gap-2.5 shrink-0">
-            <div className="w-8 h-8 sm:w-9 sm:h-9 rounded-xl bg-gradient-to-tr from-emerald-600 to-teal-500 flex items-center justify-center text-white font-extrabold shadow-md shadow-emerald-500/20 shrink-0">
-              TS
-            </div>
+            <img
+              src={logoUrl}
+              alt="牛磨 Logo"
+              className="w-8 h-8 sm:w-9 sm:h-9 rounded-xl shadow-md shadow-emerald-500/20 shrink-0 bg-white object-contain p-1"
+            />
             <div className="shrink-0">
               <span className="font-extrabold text-base sm:text-lg tracking-tight text-slate-900 whitespace-nowrap">
-                TaskSync
+                牛磨
               </span>
               <span className="text-[9px] sm:text-[10px] font-bold tracking-wider text-emerald-600 block -mt-1 uppercase whitespace-nowrap">
                 Collaboration Cloud
@@ -202,7 +205,7 @@ export const Navbar: React.FC<NavbarProps> = ({
             id="ai-copilot-trigger-btn"
             onClick={onOpenAiCopilot}
             className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-semibold shadow-sm transition-all cursor-pointer whitespace-nowrap shrink-0"
-            title="TaskSync Copilot AI 智能助手"
+            title="牛磨 Copilot AI 智能助手"
           >
             <Sparkles className="w-3.5 h-3.5 text-indigo-200 animate-pulse shrink-0" />
             <span className="whitespace-nowrap">AI Copilot</span>

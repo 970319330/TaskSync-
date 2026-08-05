@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { Task, TaskStatus, TaskPriority, Member, ChecklistItem } from '../types';
+import { Task, TaskStatus, TaskPriority, Member, ChecklistItem, TaskFeedback } from '../types';
 import { RichTextEditor } from './RichTextEditor';
 import {
   X,
@@ -34,7 +34,7 @@ export const TaskDetailModal: React.FC<TaskDetailModalProps> = ({
   onUpdateTask,
   onAddComment,
 }) => {
-  const [activeTab, setActiveTab] = useState<'comments' | 'activities'>('comments');
+  const [activeTab, setActiveTab] = useState<'comments' | 'activities' | 'feedbacks'>('comments');
   const [newChecklistTitle, setNewChecklistTitle] = useState('');
   const [newCommentText, setNewCommentText] = useState('');
   const [isEditingTitle, setIsEditingTitle] = useState(false);
@@ -43,6 +43,7 @@ export const TaskDetailModal: React.FC<TaskDetailModalProps> = ({
   const checklist = task.checklist || [];
   const comments = task.comments || [];
   const activities = task.activities || (task as any).history || [];
+  const feedbacks = task.feedbacks || [];
   const assigneeIds = task.assigneeIds || [];
   const tags = task.tags || [];
 
@@ -294,6 +295,18 @@ export const TaskDetailModal: React.FC<TaskDetailModalProps> = ({
                   <History className="w-4 h-4" />
                   <span>状态轨迹与变更历史 ({activities.length})</span>
                 </button>
+
+                <button
+                  onClick={() => setActiveTab('feedbacks')}
+                  className={`pb-2.5 flex items-center gap-2 border-b-2 transition-all cursor-pointer ${
+                    activeTab === 'feedbacks'
+                      ? 'border-indigo-600 text-indigo-700 font-bold'
+                      : 'border-transparent text-slate-500 hover:text-slate-800'
+                  }`}
+                >
+                  <CheckSquare className="w-4 h-4" />
+                  <span>开发反馈 ({feedbacks.length})</span>
+                </button>
               </div>
 
               {/* Comments Tab */}
@@ -365,6 +378,52 @@ export const TaskDetailModal: React.FC<TaskDetailModalProps> = ({
                       </div>
                     );
                   })}
+                </div>
+              )}
+
+              {/* Dev Feedback Tab */}
+              {activeTab === 'feedbacks' && (
+                <div className="space-y-3 max-h-64 overflow-y-auto pr-1">
+                  {feedbacks.length === 0 ? (
+                    <div className="text-slate-400 text-xs text-center py-4">暂无开发反馈</div>
+                  ) : (
+                    feedbacks.map((fb) => {
+                      const author = members.find((m) => m.id === fb.authorId) || { name: fb.authorId, avatar: '' };
+                      return (
+                        <div key={fb.id} className="bg-indigo-50/50 border border-indigo-200/60 p-3 rounded-xl space-y-2">
+                          <div className="flex items-center justify-between text-xs">
+                            <div className="flex items-center gap-2">
+                              <img src={author.avatar} alt={author.name} className="w-5 h-5 rounded-full object-cover" />
+                              <span className="font-bold text-slate-900">{author.name}</span>
+                              <span className="text-[10px] text-indigo-600 bg-indigo-100 px-1.5 py-0.5 rounded">开发反馈</span>
+                            </div>
+                            <span className="text-[10px] text-slate-400 font-mono">{fb.createdAt}</span>
+                          </div>
+                          <p className="text-xs text-slate-700 leading-relaxed whitespace-pre-wrap">{fb.summary}</p>
+                          {fb.changedFiles && fb.changedFiles.length > 0 && (
+                            <div className="flex flex-wrap gap-1">
+                              {fb.changedFiles.map((f, i) => (
+                                <code key={i} className="text-[10px] bg-slate-100 text-slate-700 px-1.5 py-0.5 rounded font-mono">{f}</code>
+                              ))}
+                            </div>
+                          )}
+                          {(fb.commitHash || fb.prUrl) && (
+                            <div className="flex items-center gap-2">
+                              {fb.commitHash && (
+                                <span className="text-[10px] bg-slate-800 text-slate-100 px-2 py-0.5 rounded font-mono">{fb.commitHash.slice(0, 8)}</span>
+                              )}
+                              {fb.prUrl && (
+                                <a href={fb.prUrl} target="_blank" rel="noopener noreferrer" className="text-[10px] text-blue-600 hover:underline">PR/MR ↗</a>
+                              )}
+                            </div>
+                          )}
+                          {fb.notes && (
+                            <p className="text-[11px] text-amber-800 bg-amber-50 border border-amber-200 rounded-lg p-2">{fb.notes}</p>
+                          )}
+                        </div>
+                      );
+                    })
+                  )}
                 </div>
               )}
             </div>

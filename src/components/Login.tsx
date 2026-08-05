@@ -1,4 +1,5 @@
 import React, { useState } from 'react';
+import logoUrl from '../assets/logo.png';
 import { Member, Role } from '../types';
 import { hasPermission } from '../permissions';
 import {
@@ -9,7 +10,7 @@ import {
 interface LoginProps {
   members: Member[];
   roles: Role[];
-  onLogin: (memberId: string) => void;
+  onLogin: (memberId: string) => void | Promise<void>;
 }
 
 type LoginMode = 'local' | 'zentao';
@@ -29,7 +30,27 @@ export const Login: React.FC<LoginProps> = ({ members, roles, onLogin }) => {
   const [ztPassword, setZtPassword] = useState('zhangq');
   const [ztLoading, setZtLoading] = useState(false);
   const [ztError, setZtError] = useState('');
-  const [ztResult, setZtResult] = useState<{ memberName: string; taskCount: number; imported: number; updated: number } | null>(null);
+  // 禅道登录返回的账号资料
+  interface ZentaoAccountInfo {
+    zentaoAccount?: string;
+    zentaoUserId?: string;
+    realname?: string;
+    role?: string;
+    zentaoRole?: string;
+    dept?: string;
+    email?: string;
+    phone?: string;
+    weixin?: string;
+    isAdmin?: boolean;
+    syncedAt?: string;
+  }
+  const [ztResult, setZtResult] = useState<{
+    memberName: string;
+    taskCount: number;
+    imported: number;
+    updated: number;
+    account?: ZentaoAccountInfo;
+  } | null>(null);
 
   const selectedMember = members.find((m) => m.id === selectedMemberId);
   const canViewAll = selectedMember
@@ -68,12 +89,20 @@ export const Login: React.FC<LoginProps> = ({ members, roles, onLogin }) => {
         taskCount: data.taskCount,
         imported: data.imported,
         updated: data.updated,
+        account: data.account,
       });
       // 标记本次为禅道登录会话：登录后只显示禅道同步的项目/任务/成员/频道
       sessionStorage.setItem('tasksync_login_source', 'zentao');
       sessionStorage.setItem('tasksync_zentao_member_id', data.memberId);
-      // 短暂展示结果后自动登录
-      setTimeout(() => { onLogin(data.memberId); }, 1800);
+      // 短暂展示同步结果后自动登录（展示账号资料需要更长时间）
+      // onLogin 为异步，需捕获异常，否则失败时会一直停在"正在进入工作空间"
+      setTimeout(() => {
+        Promise.resolve(onLogin(data.memberId)).catch((e) => {
+          console.error('进入工作空间失败:', e);
+          setZtResult(null);
+          setZtError('进入工作空间失败，请重试');
+        });
+      }, 2600);
     } catch (err: any) {
       setZtError(err.message || '禅道登录失败');
     } finally {
@@ -92,10 +121,10 @@ export const Login: React.FC<LoginProps> = ({ members, roles, onLogin }) => {
       <div className="relative w-full max-w-md">
         {/* Brand Header */}
         <div className="text-center mb-6">
-          <div className="inline-flex items-center justify-center w-14 h-14 rounded-2xl bg-gradient-to-tr from-emerald-600 to-teal-500 text-white font-extrabold text-xl shadow-lg shadow-emerald-500/25 mb-3">
-            TS
+          <div className="inline-flex items-center justify-center w-14 h-14 rounded-2xl bg-white shadow-lg shadow-emerald-500/25 mb-3 p-2">
+            <img src={logoUrl} alt="牛磨 Logo" className="w-full h-full object-contain" />
           </div>
-          <h1 className="text-2xl font-extrabold tracking-tight text-slate-900">TaskSync</h1>
+          <h1 className="text-2xl font-extrabold tracking-tight text-slate-900">牛磨</h1>
           <p className="text-[11px] font-bold tracking-wider text-emerald-600 uppercase mt-0.5">Collaboration Cloud</p>
           <p className="text-xs text-slate-500 mt-3">登录你的协作空间，开始高效推进任务</p>
         </div>
@@ -206,6 +235,58 @@ export const Login: React.FC<LoginProps> = ({ members, roles, onLogin }) => {
                     <div className="text-sm font-bold text-slate-900">禅道登录成功</div>
                     <div className="text-xs text-slate-500 mt-1">欢迎，{ztResult.memberName}</div>
                   </div>
+
+                  {/* 禅道账号资料同步结果 */}
+                  {ztResult.account && (
+                    <div className="bg-indigo-50/60 border border-indigo-200/70 rounded-xl p-3 space-y-1.5 text-[11px]">
+                      <div className="flex items-center gap-1.5 font-bold text-indigo-800 mb-1">
+                        <UserIcon className="w-3.5 h-3.5" />
+                        <span>已同步禅道账号资料</span>
+                      </div>
+                      <div className="grid grid-cols-2 gap-x-3 gap-y-1 text-slate-600">
+                        <div>
+                          <span className="text-slate-400">账号 </span>
+                          <span className="font-mono font-semibold text-slate-800">{ztResult.account.zentaoAccount}</span>
+                        </div>
+                        {ztResult.account.zentaoUserId && (
+                          <div>
+                            <span className="text-slate-400">禅道 ID </span>
+                            <span className="font-mono font-semibold text-slate-800">{ztResult.account.zentaoUserId}</span>
+                          </div>
+                        )}
+                        {ztResult.account.role && (
+                          <div className="col-span-2">
+                            <span className="text-slate-400">角色 </span>
+                            <span className="font-semibold text-slate-800">{ztResult.account.role}</span>
+                            {ztResult.account.zentaoRole && (
+                              <span className="text-slate-400 font-mono"> ({ztResult.account.zentaoRole})</span>
+                            )}
+                            {ztResult.account.isAdmin && (
+                              <span className="ml-1 text-[9px] bg-amber-100 text-amber-700 px-1.5 py-0.5 rounded font-bold">管理员</span>
+                            )}
+                          </div>
+                        )}
+                        {ztResult.account.email && (
+                          <div className="col-span-2 truncate">
+                            <span className="text-slate-400">邮箱 </span>
+                            <span className="font-semibold text-slate-800">{ztResult.account.email}</span>
+                          </div>
+                        )}
+                        {ztResult.account.phone && (
+                          <div>
+                            <span className="text-slate-400">手机 </span>
+                            <span className="font-semibold text-slate-800">{ztResult.account.phone}</span>
+                          </div>
+                        )}
+                        {ztResult.account.weixin && (
+                          <div className="truncate">
+                            <span className="text-slate-400">微信 </span>
+                            <span className="font-semibold text-slate-800">{ztResult.account.weixin}</span>
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                  )}
                   <div className="grid grid-cols-3 gap-2 text-center">
                     <div className="bg-slate-50 border border-slate-200 rounded-xl py-2.5">
                       <div className="text-lg font-extrabold text-indigo-600">{ztResult.taskCount}</div>
@@ -299,14 +380,14 @@ export const Login: React.FC<LoginProps> = ({ members, roles, onLogin }) => {
               <Sparkles className="w-3.5 h-3.5 text-indigo-500 shrink-0 mt-0.5" />
               <span>
                 <strong className="text-slate-700">禅道登录：</strong>
-                使用禅道账号密码登录，自动同步你的禅道任务（含任务详情、需求规格、图片）到 TaskSync。首次登录会自动创建/匹配本地账号。
+                使用禅道账号密码登录，自动同步你的禅道任务（含任务详情、需求规格、图片）与账号资料到 牛磨。首次登录会自动创建/匹配本地账号。
               </span>
             </div>
           )}
         </div>
 
         <p className="text-center text-[10px] text-slate-400 mt-5">
-          © 2026 TaskSync Collaboration Cloud · 安全协同 · 高效交付
+          © 2026 牛磨 Collaboration Cloud · 安全协同 · 高效交付
         </p>
       </div>
     </div>

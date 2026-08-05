@@ -88,7 +88,7 @@ export const AnalyticsDashboard: React.FC<AnalyticsDashboardProps> = ({
         <div className="bg-purple-50 border border-purple-200 rounded-2xl p-5 shadow-sm animate-fadeIn">
           <div className="flex items-center gap-2 text-purple-900 font-bold text-sm mb-3">
             <Sparkles className="w-4 h-4 text-purple-600" />
-            <span>TaskSync AI Copilot 站会与风险总结报告:</span>
+            <span>牛磨 AI Copilot 站会与风险总结报告:</span>
           </div>
           <div className="text-xs text-slate-800 whitespace-pre-wrap leading-relaxed font-sans bg-white p-4 rounded-xl border border-purple-100 shadow-2xs">
             {aiSummary}

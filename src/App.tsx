@@ -31,6 +31,7 @@ import { AiCopilotDrawer } from './components/AiCopilotDrawer';
 import { Login } from './components/Login';
 import { ZentaoSyncModal } from './components/ZentaoSyncModal';
 import { hasPermission } from './permissions';
+import logoUrl from './assets/logo.png';
 import { Loader2 } from 'lucide-react';
 
 export default function App() {
@@ -64,13 +65,16 @@ export default function App() {
     localStorage.setItem('tasksync_logged_in_member_id', memberId);
     setLoggedInMemberId(memberId);
     // 立即设置 currentMember，避免等待 fetchState 重跑
+    // 注意：禅道登录时该成员可能是服务端刚创建的，本地 members 中还没有，
+    // 此时依赖下面 fetchState 显式传入 memberId 来兜底设置
     const m = members.find((mem) => mem.id === memberId);
     if (m) setCurrentMember(m);
     // 同步禅道登录会话标记
     setIsZentaoSession(sessionStorage.getItem('tasksync_login_source') === 'zentao');
     // 登录后强制刷新 state，确保显示最新的项目/任务数据
     // （禅道登录会在 server 端新增项目和任务，需要重新拉取）
-    await fetchState(true);
+    // 显式传入 memberId，避免 fetchState 闭包读到过期的 loggedInMemberId 导致卡在登录页
+    await fetchState(true, memberId);
   };
 
   const handleLogout = () => {
@@ -100,7 +104,8 @@ export default function App() {
   const [showZentaoSyncModal, setShowZentaoSyncModal] = useState(false);
 
   // Initial Fetch State
-  const fetchState = async (force = false) => {
+  // loginMemberId：登录场景下显式传入成员 ID，避免读取到闭包中过期的 loggedInMemberId
+  const fetchState = async (force = false, loginMemberId?: string) => {
     try {
       const res = await fetch('/api/state');
       const data = await res.json();
@@ -117,8 +122,9 @@ export default function App() {
           setActiveProject(data.projects[0]);
         }
         // 若已登录，则以登录身份作为 currentMember；否则保持 null（由登录页处理）
-        if (loggedInMemberId) {
-          const loggedIn = (data.members || []).find((m) => m.id === loggedInMemberId);
+        const effectiveMemberId = loginMemberId || loggedInMemberId;
+        if (effectiveMemberId) {
+          const loggedIn = (data.members || []).find((m) => m.id === effectiveMemberId);
           if (loggedIn) {
             setCurrentMember(loggedIn);
           } else {
@@ -142,13 +148,15 @@ export default function App() {
       }
     } catch (err) {
       console.error('Failed to load workspace state:', err);
+      throw err;
     } finally {
       setLoading(false);
     }
   };
 
   useEffect(() => {
-    fetchState();
+    // 初始加载失败已在 fetchState 内打印日志，此处捕获避免未处理的 rejection
+    fetchState().catch(() => {});
   }, []);
 
   // 数据权限：管理员 / 产品经理可看全部；其他成员仅能看到自己经办或报告的任务
@@ -156,13 +164,21 @@ export default function App() {
   const canViewAllTasks = currentMember ? hasPermission(currentMember, 'assign_task', roles) : false;
   // 禅道登录会话：只显示禅道同步的项目/任务（id 以 ZT- 开头，projectId 以 zentao- 开头）
   const isZentaoTask = (t: Task) => t.id.startsWith('ZT-') || t.projectId.startsWith('zentao-');
-  const isZentaoProject = (p: Project) => p.id.startsWith('zentao-') || tasks.some((t) => t.id.startsWith('ZT-') && t.projectId === p.id);
+  // 禅道会话下判断任务是否属于当前登录账号：
+  // 优先用任务上的 zentaoAccount 标记，其次回退到经办人/报告人归属
+  const isOwnZentaoTask = (t: Task) => {
+    if (!currentMember) return false;
+    if (t.zentaoAccount && currentMember.zentaoAccount) {
+      return t.zentaoAccount === currentMember.zentaoAccount;
+    }
+    return t.assigneeIds?.includes(currentMember.id) || t.reporterId === currentMember.id;
+  };
   const visibleTasks = currentMember
     ? tasks.filter((t) => {
-        // 禅道会话：只保留禅道任务
-        if (isZentaoSession && !isZentaoTask(t)) return false;
+        // 禅道会话：只保留当前禅道账号自己的任务，避免多账号任务互相串现
+        if (isZentaoSession) return isZentaoTask(t) && isOwnZentaoTask(t);
         // 非禅道会话：按角色权限过滤
-        if (!isZentaoSession && !canViewAllTasks) {
+        if (!canViewAllTasks) {
           return t.assigneeIds?.includes(currentMember.id) || t.reporterId === currentMember.id;
         }
         return true;
@@ -179,12 +195,15 @@ export default function App() {
 
   // 禅道会话下，若当前 activeProject 不在可见项目列表中，自动切换到第一个可见项目
   useEffect(() => {
-    if (!isZentaoSession || !activeProject) return;
-    const inVisible = projects.filter((p) => p.id.startsWith('zentao-') || tasks.some((t) => t.id.startsWith('ZT-') && t.projectId === p.id));
-    if (!inVisible.find((p) => p.id === activeProject.id) && inVisible.length > 0) {
+    if (!isZentaoSession) return;
+    // 可见项目 = 当前账号可见任务所属的项目
+    const visibleProjectIds = new Set(visibleTasks.map((t) => t.projectId));
+    const inVisible = projects.filter((p) => visibleProjectIds.has(p.id));
+    if (inVisible.length === 0) return;
+    if (!activeProject || !inVisible.find((p) => p.id === activeProject.id)) {
       setActiveProject(inVisible[0]);
     }
-  }, [isZentaoSession, projects, tasks]);
+  }, [isZentaoSession, projects, tasks, currentMember, activeProject]);
 
   // Update Task Status
   const handleUpdateTaskStatus = async (taskId: string, newStatus: TaskStatus) => {
@@ -532,8 +551,9 @@ export default function App() {
     return (
       <div className="min-h-screen bg-slate-50 text-slate-900 flex items-center justify-center p-6">
         <div className="flex flex-col items-center gap-3 text-emerald-600">
-          <Loader2 className="w-8 h-8 animate-spin" />
-          <span className="text-sm font-semibold tracking-wide">加载 TaskSync 协作空间...</span>
+          <img src={logoUrl} alt="牛磨 Logo" className="w-14 h-14 object-contain mb-2" />
+          <Loader2 className="w-7 h-7 animate-spin" />
+          <span className="text-sm font-semibold tracking-wide">加载 牛磨 协作空间...</span>
         </div>
       </div>
     );
@@ -565,8 +585,12 @@ export default function App() {
     : notifications.filter((n) => n.recipientId === currentMember.id);
 
   // 禅道登录会话：项目/成员/频道也只显示禅道相关数据
+  // 项目按「当前账号可见任务所属项目」过滤，避免显示其他禅道账号的项目
   const visibleProjects = isZentaoSession
-    ? projects.filter((p) => p.id.startsWith('zentao-') || tasks.some((t) => t.id.startsWith('ZT-') && t.projectId === p.id))
+    ? (() => {
+        const ids = new Set(visibleTasks.map((t) => t.projectId));
+        return projects.filter((p) => ids.has(p.id));
+      })()
     : projects;
   const zentaoMemberId = isZentaoSession ? sessionStorage.getItem('tasksync_zentao_member_id') : null;
   const visibleMembers = isZentaoSession

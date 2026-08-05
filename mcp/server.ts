@@ -222,6 +222,7 @@ server.tool(
           checklist?: Array<{ id: string; title: string; completed: boolean; assigneeId?: string }>;
           comments?: Array<{ id: string; authorId: string; content: string; timestamp: string }>;
           activities?: Array<{ id: string; action: string; authorId: string; timestamp: string; details?: string }>;
+          feedbacks?: Array<{ id: string; authorId: string; summary: string; changedFiles?: string[]; commitHash?: string; prUrl?: string; dependencies?: string[]; notes?: string; createdAt: string }>;
         }>;
         projects: Array<{ id: string; name: string }>;
         members: Array<{ id: string; name: string; avatar?: string }>;
@@ -270,6 +271,16 @@ server.tool(
           author: memberById(a.authorId)?.name || a.authorId,
           timestamp: a.timestamp,
           details: a.details || null,
+        })),
+        feedbacks: (task.feedbacks || []).map((f) => ({
+          author: memberById(f.authorId)?.name || f.authorId,
+          summary: f.summary,
+          changedFiles: f.changedFiles || [],
+          commitHash: f.commitHash || null,
+          prUrl: f.prUrl || null,
+          dependencies: f.dependencies || [],
+          notes: f.notes || null,
+          createdAt: f.createdAt,
         })),
       };
 
@@ -399,36 +410,51 @@ server.tool(
       // 归一化数组参数（兜底 MCP 客户端序列化异常）
       const safeChangedFiles = normalizeStringArray(changedFiles);
       const safeDependencies = normalizeStringArray(dependencies);
-
-      // 组装结构化的开发报告
-      const lines: string[] = [`## 开发完成报告\n`, `**完成内容：**\n${summary}`];
-      if (safeChangedFiles.length > 0) {
-        lines.push(`\n**修改文件：**\n${safeChangedFiles.map((f) => `- \`${f}\``).join('\n')}`);
-      }
-      if (safeDependencies.length > 0) {
-        lines.push(`\n**依赖变更：**\n${safeDependencies.map((d) => `- ${d}`).join('\n')}`);
-      }
-      if (commitHash) {
-        lines.push(`\n**Commit:** \`${commitHash}\``);
-      }
-      if (prUrl) {
-        lines.push(`\n**PR/MR:** ${prUrl}`);
-      }
-      if (notes) {
-        lines.push(`\n**注意事项：**\n${notes}`);
-      }
-      lines.push(`\n---\n*由 MCP 工具 submit_task_result 自动生成于 ${new Date().toISOString()}*`);
-
-      const report = lines.join('\n');
       const targetStatus = finalStatus || 'review';
+      const effectiveActorId = actorId || 'usr_alex';
+
+      // 通过专用 feedback 端点提交结构化开发反馈
+      let feedbackOk = false;
+      try {
+        const fbResult = await apiRequest(`/api/tasks/${encodeURIComponent(id)}/feedback`, {
+          method: 'POST',
+          body: {
+            authorId: effectiveActorId,
+            summary,
+            changedFiles: safeChangedFiles,
+            commitHash: commitHash || undefined,
+            prUrl: prUrl || undefined,
+            dependencies: safeDependencies,
+            notes: notes || undefined,
+          },
+        });
+        feedbackOk = (fbResult as any)?.success === true;
+      } catch (fbErr) {
+        // 专用端点失败时，回退到 PUT 状态更新携带 devFeedback 字段
+        const message = fbErr instanceof Error ? fbErr.message : String(fbErr);
+        console.error('[submit_task_result] feedback endpoint failed, fallback to PUT:', message);
+      }
+
+      // 更新任务状态（推进到 review / done），若 feedback 端点未成功则附带 devFeedback 数据
+      const putBody: Record<string, unknown> = {
+        status: targetStatus,
+        actorId: effectiveActorId,
+      };
+      if (!feedbackOk) {
+        putBody.devFeedback = {
+          authorId: effectiveActorId,
+          summary,
+          changedFiles: safeChangedFiles,
+          commitHash: commitHash || undefined,
+          prUrl: prUrl || undefined,
+          dependencies: safeDependencies,
+          notes: notes || undefined,
+        };
+      }
 
       const result = (await apiRequest(`/api/tasks/${encodeURIComponent(id)}`, {
         method: 'PUT',
-        body: {
-          status: targetStatus,
-          activityNote: report,
-          actorId: actorId || 'usr_alex',
-        },
+        body: putBody,
       })) as { success: boolean; task?: { id: string; status: string } };
 
       return {
@@ -441,6 +467,7 @@ server.tool(
                 message: `任务 ${id} 开发结果已回写，状态推进到 ${targetStatus}${targetStatus === 'review' ? '（已触发测试流转）' : ''}`,
                 taskId: id,
                 newStatus: result.task?.status || targetStatus,
+                feedbackWritten: feedbackOk,
                 summaryLength: summary.length,
                 changedFilesCount: safeChangedFiles.length,
               },

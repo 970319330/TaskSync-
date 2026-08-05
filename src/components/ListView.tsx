@@ -1,6 +1,7 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { Task, TaskStatus, TaskPriority, Member, Role, getTaskColor } from '../types';
 import { hasPermission } from '../permissions';
+import { Pagination } from './Pagination';
 import {
   ArrowUpDown,
   CheckSquare,
@@ -44,6 +45,8 @@ export const ListView: React.FC<ListViewProps> = ({
   const [priorityFilter, setPriorityFilter] = useState<string>('all');
   const [sortField, setSortField] = useState<'id' | 'dueDate' | 'priority' | 'hours'>('dueDate');
   const [sortAsc, setSortAsc] = useState(true);
+  const [currentPage, setCurrentPage] = useState(1);
+  const [pageSize, setPageSize] = useState(20);
 
   // 列表视图不允许修改状态；优先级仅管理员 / 产品经理可修改
   const canEditPriority = hasPermission(currentMember, 'assign_task', roles);
@@ -77,13 +80,34 @@ export const ListView: React.FC<ListViewProps> = ({
     return sortAsc ? cmp : -cmp;
   });
 
+  // 筛选 / 搜索 / 排序变化时回到第一页，避免停留在越界的空白页
+  useEffect(() => {
+    setCurrentPage(1);
+  }, [statusFilter, priorityFilter, searchQuery, sortField, sortAsc]);
+
+  // 任务总数减少（如删除）导致当前页越界时，回退到最后一页
+  const totalPages = Math.max(1, Math.ceil(sorted.length / pageSize));
+  useEffect(() => {
+    if (currentPage > totalPages) setCurrentPage(totalPages);
+  }, [totalPages, currentPage]);
+
+  // 当前页数据
+  const paged = sorted.slice((currentPage - 1) * pageSize, currentPage * pageSize);
+
   const toggleSelectAll = () => {
-    if (selectedTaskIds.length === sorted.length) {
-      setSelectedTaskIds([]);
+    // 全选范围限定为当前页，避免误操作不可见的任务
+    const pagedIds = paged.map((t) => t.id);
+    const allPagedSelected = pagedIds.length > 0 && pagedIds.every((id) => selectedTaskIds.includes(id));
+    if (allPagedSelected) {
+      setSelectedTaskIds(selectedTaskIds.filter((id) => !pagedIds.includes(id)));
     } else {
-      setSelectedTaskIds(sorted.map((t) => t.id));
+      setSelectedTaskIds([...new Set([...selectedTaskIds, ...pagedIds])]);
     }
   };
+
+  // 当前页是否已全选（用于表头 checkbox 状态）
+  const isPageAllSelected =
+    paged.length > 0 && paged.every((t) => selectedTaskIds.includes(t.id));
 
   const toggleSelectTask = (id: string, e: React.MouseEvent) => {
     e.stopPropagation();
@@ -156,7 +180,10 @@ export const ListView: React.FC<ListViewProps> = ({
           </div>
         )}
 
-        <div className="text-xs text-slate-500 font-mono">显示 {sorted.length} 条任务</div>
+        <div className="text-xs text-slate-500 font-mono">
+          共 {sorted.length} 条任务
+          {totalPages > 1 && <span className="ml-1 text-slate-400">· 第 {currentPage}/{totalPages} 页</span>}
+        </div>
       </div>
 
       {/* Table Container */}
@@ -168,8 +195,9 @@ export const ListView: React.FC<ListViewProps> = ({
                 <th className="p-3 w-10 text-center">
                   <input
                     type="checkbox"
-                    checked={selectedTaskIds.length > 0 && selectedTaskIds.length === sorted.length}
+                    checked={isPageAllSelected}
                     onChange={toggleSelectAll}
+                    title="全选/取消全选当前页"
                     className="rounded border-slate-300 bg-white text-emerald-600 focus:ring-0 cursor-pointer"
                   />
                 </th>
@@ -200,7 +228,7 @@ export const ListView: React.FC<ListViewProps> = ({
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-100 text-xs text-slate-700">
-              {sorted.map((task) => {
+              {paged.map((task) => {
                 const isSelected = selectedTaskIds.includes(task.id);
                 const st = statusMap[task.status];
                 const taskColor = getTaskColor(task.color);
@@ -315,7 +343,7 @@ export const ListView: React.FC<ListViewProps> = ({
                 );
               })}
 
-              {sorted.length === 0 && (
+              {paged.length === 0 && (
                 <tr>
                   <td colSpan={10} className="p-12 text-center text-slate-400 text-sm">
                     没有找到匹配的任务
@@ -325,6 +353,15 @@ export const ListView: React.FC<ListViewProps> = ({
             </tbody>
           </table>
         </div>
+
+        {/* 分页控件 */}
+        <Pagination
+          totalItems={sorted.length}
+          currentPage={currentPage}
+          pageSize={pageSize}
+          onPageChange={setCurrentPage}
+          onPageSizeChange={setPageSize}
+        />
       </div>
     </div>
   );

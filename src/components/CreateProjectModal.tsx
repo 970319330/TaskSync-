@@ -125,7 +125,7 @@ export const CreateProjectModal: React.FC<CreateProjectModalProps> = ({
                 required
                 value={name}
                 onChange={(e) => setName(e.target.value)}
-                placeholder="例如:TaskSync Cloud v3.0 敏捷迭代"
+                placeholder="例如:牛磨 Cloud v3.0 敏捷迭代"
                 className="w-full bg-white border border-slate-200 rounded-xl px-4 py-2.5 text-sm text-slate-900 placeholder-slate-400 focus:outline-none focus:border-emerald-500 shadow-2xs font-semibold"
               />
             </div>

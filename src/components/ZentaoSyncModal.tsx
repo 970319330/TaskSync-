@@ -1,4 +1,5 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
+import { Pagination } from './Pagination';
 import {
   X,
   RefreshCw,
@@ -69,6 +70,18 @@ export const ZentaoSyncModal: React.FC<ZentaoSyncModalProps> = ({ onClose, onImp
   const [error, setError] = useState('');
   const [ztTasks, setZtTasks] = useState<ZentaoTask[] | null>(null);
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
+  const [currentPage, setCurrentPage] = useState(1);
+  const [pageSize, setPageSize] = useState(10);
+
+  // 重新同步拉到新数据后回到第一页
+  useEffect(() => {
+    setCurrentPage(1);
+  }, [ztTasks]);
+
+  // 当前页任务
+  const pagedTasks = ztTasks
+    ? ztTasks.slice((currentPage - 1) * pageSize, currentPage * pageSize)
+    : [];
 
   const handleSync = async () => {
     setError('');
@@ -138,7 +151,7 @@ export const ZentaoSyncModal: React.FC<ZentaoSyncModalProps> = ({ onClose, onImp
             <div>
               <h2 className="text-base font-bold text-slate-900">禅道数据同步</h2>
               <p className="text-[11px] text-slate-500">
-                从禅道（124.70.211.186:7099）同步任务到 TaskSync
+                从禅道（124.70.211.186:7099）同步任务到 牛磨
               </p>
             </div>
           </div>
@@ -240,6 +253,7 @@ export const ZentaoSyncModal: React.FC<ZentaoSyncModalProps> = ({ onClose, onImp
                           type="checkbox"
                           checked={selectedIds.size === ztTasks.length && ztTasks.length > 0}
                           onChange={toggleSelectAll}
+                          title="全选/取消全选所有任务（含其他分页）"
                           className="rounded border-slate-300 text-indigo-600 focus:ring-0 cursor-pointer"
                         />
                       </th>
@@ -253,7 +267,7 @@ export const ZentaoSyncModal: React.FC<ZentaoSyncModalProps> = ({ onClose, onImp
                     </tr>
                   </thead>
                   <tbody>
-                    {ztTasks.map((t) => {
+                    {pagedTasks.map((t) => {
                       const isSelected = selectedIds.has(t.id);
                       const st = statusMap[t.status] || statusMap.todo;
                       const pri = priorityMap[t.priority] || priorityMap.low;
@@ -339,6 +353,17 @@ export const ZentaoSyncModal: React.FC<ZentaoSyncModalProps> = ({ onClose, onImp
                     })}
                   </tbody>
                 </table>
+
+                {/* 分页控件（紧凑模式适配弹窗） */}
+                <Pagination
+                  totalItems={ztTasks.length}
+                  currentPage={currentPage}
+                  pageSize={pageSize}
+                  onPageChange={setCurrentPage}
+                  onPageSizeChange={setPageSize}
+                  pageSizeOptions={[10, 20, 50]}
+                  compact
+                />
               </div>
 
               <div className="text-[11px] text-slate-400 flex items-center gap-1.5">

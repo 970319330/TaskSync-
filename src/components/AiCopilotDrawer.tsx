@@ -26,7 +26,7 @@ export const AiCopilotDrawer: React.FC<AiCopilotDrawerProps> = ({
   const [aiChatMessages, setAiChatMessages] = useState<Array<{ role: 'user' | 'ai'; text: string }>>([
     {
       role: 'ai',
-      text: '你好！我是 **TaskSync Copilot** 智能助手。我可以帮您：\n- 自动提取或拆解任务至**富文本正文**\n- 一键总结 **Sprint 迭代日/周报**\n- 分析团队成员工作负荷与瓶颈',
+      text: '你好！我是 **牛磨 Copilot** 智能助手。我可以帮您：\n- 自动提取或拆解任务至**富文本正文**\n- 一键总结 **Sprint 迭代日/周报**\n- 分析团队成员工作负荷与瓶颈',
     },
   ]);
   const [isAsking, setIsAsking] = useState(false);

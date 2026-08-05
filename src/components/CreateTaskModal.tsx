@@ -53,8 +53,9 @@ export const CreateTaskModal: React.FC<CreateTaskModalProps> = ({
   const [checklist, setChecklist] = useState<ChecklistItem[]>([]);
 
   // 流转控制:测试负责人 & 开发完成自动流转测试
+  // 默认取第一个非 AI 成员作为测试负责人
   const [testerId, setTesterId] = useState<string>(
-    members.find((m) => m.id === 'usr_sarah' || m.id === 'usr_elena')?.id || members[0]?.id || ''
+    members.find((m) => m.roleId !== 'role_ai')?.id || members[0]?.id || ''
   );
   const [autoFlowToTest, setAutoFlowToTest] = useState(true);
 
@@ -205,7 +206,7 @@ export const CreateTaskModal: React.FC<CreateTaskModalProps> = ({
             <div className="flex items-center justify-between text-xs font-bold text-purple-900">
               <div className="flex items-center gap-2">
                 <Sparkles className="w-4 h-4 text-purple-600 animate-pulse" />
-                <span className="text-sm">TaskSync AI Copilot 智能拆解与生成</span>
+                <span className="text-sm">牛磨 AI Copilot 智能拆解与生成</span>
               </div>
               <span className="text-xs text-purple-700 font-medium hidden sm:inline-block">输入总体目标，AI 自动整理富文本正文、拆解子任务与估算工时</span>
             </div>
