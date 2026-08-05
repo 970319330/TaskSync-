@@ -58,6 +58,21 @@ const server = new McpServer({
 });
 
 /**
+ * 兜底：部分 MCP 客户端会把单元素数组错误序列化为对象（例如 `{0: 'foo'}`），
+ * 这里统一归一化为字符串数组，避免下游 `Array.map` 报错。
+ */
+function normalizeStringArray(input: unknown): string[] {
+  if (Array.isArray(input)) return input.filter((x): x is string => typeof x === 'string');
+  if (input && typeof input === 'object') {
+    // 兼容 {0: 'a', 1: 'b'} 这种被错误序列化的对象
+    return Object.values(input as Record<string, unknown>).filter(
+      (x): x is string => typeof x === 'string'
+    );
+  }
+  return [];
+}
+
+/**
  * 工具 1: 拉取待开发任务
  *
  * 默认返回状态为 backlog / todo 的任务，可通过参数筛选。
@@ -320,6 +335,114 @@ server.tool(
                 message: `任务 ${id} 状态已更新为 ${status}${newPriority ? `，优先级 ${newPriority}` : ''}${typeof loggedHours === 'number' ? `，已用工时 ${loggedHours}h` : ''}${note ? `，备注：${note}` : ''}`,
                 taskId: id,
                 newStatus: status,
+              },
+              null,
+              2
+            ),
+          },
+        ],
+      };
+    } catch (err: unknown) {
+      const message = err instanceof Error ? err.message : String(err);
+      return { content: [{ type: 'text', text: `Error: ${message}` }], isError: true };
+    }
+  }
+);
+
+/**
+ * 工具 4: 回写任务结果
+ *
+ * 在完成开发后，提交开发总结、变更清单、提交记录等，作为评论 + 活动记录写入任务，
+ * 并自动将状态推进到 review（触发后端的"开发完成流转测试"逻辑）。
+ */
+server.tool(
+  'submit_task_result',
+  '回写开发结果到 TaskSync：写入开发总结评论 + 活动记录，并将任务状态推进到 review（自动触发测试流转）。',
+  {
+    id: z.string().describe('任务 ID'),
+    summary: z
+      .string()
+      .describe('必填：开发总结/完成的功能点描述（会作为评论写入）'),
+    changedFiles: z
+      .array(z.string())
+      .optional()
+      .default(() => [])
+      .describe('可选：本次修改的文件清单'),
+    commitHash: z
+      .string()
+      .optional()
+      .describe('可选：Git commit hash'),
+    prUrl: z
+      .string()
+      .optional()
+      .describe('可选：PR / MR 链接'),
+    dependencies: z
+      .array(z.string())
+      .optional()
+      .default(() => [])
+      .describe('可选：新增/升级的依赖'),
+    notes: z
+      .string()
+      .optional()
+      .describe('可选：需要团队知悉的注意事项（如环境变量、配置项）'),
+    actorId: z
+      .string()
+      .optional()
+      .describe('操作人 ID（可选，默认 usr_alex）'),
+    finalStatus: z
+      .enum(['review', 'done'])
+      .optional()
+      .describe('可选：目标状态，默认 review（推荐，便于自动流转测试）'),
+  },
+  async ({ id, summary, changedFiles, commitHash, prUrl, dependencies, notes, actorId, finalStatus }) => {
+    try {
+      // 归一化数组参数（兜底 MCP 客户端序列化异常）
+      const safeChangedFiles = normalizeStringArray(changedFiles);
+      const safeDependencies = normalizeStringArray(dependencies);
+
+      // 组装结构化的开发报告
+      const lines: string[] = [`## 开发完成报告\n`, `**完成内容：**\n${summary}`];
+      if (safeChangedFiles.length > 0) {
+        lines.push(`\n**修改文件：**\n${safeChangedFiles.map((f) => `- \`${f}\``).join('\n')}`);
+      }
+      if (safeDependencies.length > 0) {
+        lines.push(`\n**依赖变更：**\n${safeDependencies.map((d) => `- ${d}`).join('\n')}`);
+      }
+      if (commitHash) {
+        lines.push(`\n**Commit:** \`${commitHash}\``);
+      }
+      if (prUrl) {
+        lines.push(`\n**PR/MR:** ${prUrl}`);
+      }
+      if (notes) {
+        lines.push(`\n**注意事项：**\n${notes}`);
+      }
+      lines.push(`\n---\n*由 MCP 工具 submit_task_result 自动生成于 ${new Date().toISOString()}*`);
+
+      const report = lines.join('\n');
+      const targetStatus = finalStatus || 'review';
+
+      const result = (await apiRequest(`/api/tasks/${encodeURIComponent(id)}`, {
+        method: 'PUT',
+        body: {
+          status: targetStatus,
+          activityNote: report,
+          actorId: actorId || 'usr_alex',
+        },
+      })) as { success: boolean; task?: { id: string; status: string } };
+
+      return {
+        content: [
+          {
+            type: 'text',
+            text: JSON.stringify(
+              {
+                success: true,
+                message: `任务 ${id} 开发结果已回写，状态推进到 ${targetStatus}${targetStatus === 'review' ? '（已触发测试流转）' : ''}`,
+                taskId: id,
+                newStatus: result.task?.status || targetStatus,
+                summaryLength: summary.length,
+                changedFilesCount: safeChangedFiles.length,
               },
               null,
               2
