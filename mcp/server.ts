@@ -303,8 +303,8 @@ server.tool(
   {
     id: z.string().describe('任务 ID'),
     status: z
-      .enum(['backlog', 'todo', 'in_progress', 'review', 'done'])
-      .describe('目标状态：backlog / todo / in_progress / review / done'),
+      .enum(['backlog', 'todo', 'in_progress', 'paused', 'review', 'done'])
+      .describe('目标状态：backlog / todo / in_progress / paused / review / done'),
     actorId: z
       .string()
       .optional()

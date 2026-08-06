@@ -73,6 +73,14 @@ const COLUMNS: { id: TaskStatus; title: string; color: string; border: string; b
     border: 'border-emerald-200/80',
     bg: 'bg-emerald-50/50',
   },
+  // ↓↓ 异常搁置区（主线之外）↓↓
+  {
+    id: 'paused',
+    title: '已暂停 (Paused)',
+    color: 'text-orange-700',
+    border: 'border-orange-200/80',
+    bg: 'bg-orange-50/50',
+  },
 ];
 
 export const KanbanBoard: React.FC<KanbanBoardProps> = ({
@@ -275,11 +283,23 @@ export const KanbanBoard: React.FC<KanbanBoardProps> = ({
             const colTasks = filteredTasks.filter((t) => t.status === column.id);
             const totalHours = colTasks.reduce((sum, t) => sum + (t.estimatedHours || 0), 0);
 
+            // 异常搁置区分隔线（在 paused 列前显示，将主线与异常态视觉分离）
+            const separator = column.id === 'paused' ? (
+              <div className="flex flex-col items-center justify-center self-stretch shrink-0 px-1">
+                <div className="w-px flex-1 bg-slate-300/60" />
+                <span className="text-[10px] font-bold text-slate-400 whitespace-nowrap [writing-mode:vertical-rl] rotate-180 my-2">
+                  异常搁置
+                </span>
+                <div className="w-px flex-1 bg-slate-300/60" />
+              </div>
+            ) : null;
+
             // Collapsed Column View
             if (isCollapsed) {
               return (
-                <div
-                  key={column.id}
+                <React.Fragment key={column.id}>
+                  {separator}
+                  <div
                   onClick={() => toggleColumnCollapse(column.id)}
                   className={`w-12 min-w-[48px] max-w-[48px] rounded-2xl border ${column.border} ${column.bg} py-4 px-1 flex flex-col items-center justify-between h-[calc(100vh-210px)] min-h-[550px] shadow-2xs cursor-pointer hover:border-emerald-400 transition-all group`}
                   title={`点击展开 ${column.title}`}
@@ -302,12 +322,14 @@ export const KanbanBoard: React.FC<KanbanBoardProps> = ({
                     <ChevronRight className="w-3.5 h-3.5" />
                   </button>
                 </div>
+                </React.Fragment>
               );
             }
 
             return (
-              <div
-                key={column.id}
+              <React.Fragment key={column.id}>
+                {separator}
+                <div
                 className={`flex-1 min-w-[260px] max-w-[340px] rounded-2xl border ${column.border} ${column.bg} p-3 flex flex-col h-[calc(100vh-210px)] min-h-[550px] shadow-2xs transition-all`}
               >
                 {/* Column Header */}
@@ -366,11 +388,11 @@ export const KanbanBoard: React.FC<KanbanBoardProps> = ({
                               {getPriorityBadge(task.priority, true)}
                               {canEditTask && (
                                 <div className="opacity-0 group-hover:opacity-100 transition-opacity flex items-center gap-0.5 bg-white rounded p-0.5 border border-slate-200 shadow-2xs">
-                                  {column.id !== 'backlog' && (
+                                  {column.id !== 'backlog' && column.id !== 'paused' && (
                                     <button
                                       onClick={(e) => {
                                         e.stopPropagation();
-                                        const statuses: TaskStatus[] = ['backlog', 'todo', 'in_progress', 'review', 'done'];
+                                        const statuses: TaskStatus[] = ['backlog', 'todo', 'in_progress', 'review', 'done', 'paused'];
                                         const currIdx = statuses.indexOf(column.id);
                                         onUpdateTaskStatus(task.id, statuses[currIdx - 1]);
                                       }}
@@ -380,11 +402,11 @@ export const KanbanBoard: React.FC<KanbanBoardProps> = ({
                                       <ArrowLeft className="w-3 h-3" />
                                     </button>
                                   )}
-                                  {column.id !== 'done' && (
+                                  {column.id !== 'done' && column.id !== 'paused' && (
                                     <button
                                       onClick={(e) => {
                                         e.stopPropagation();
-                                        const statuses: TaskStatus[] = ['backlog', 'todo', 'in_progress', 'review', 'done'];
+                                        const statuses: TaskStatus[] = ['backlog', 'todo', 'in_progress', 'review', 'done', 'paused'];
                                         const currIdx = statuses.indexOf(column.id);
                                         onUpdateTaskStatus(task.id, statuses[currIdx + 1]);
                                       }}
@@ -470,7 +492,7 @@ export const KanbanBoard: React.FC<KanbanBoardProps> = ({
                             {/* Quick move buttons */}
                             {canEditTask && (
                               <div className="opacity-0 group-hover:opacity-100 transition-opacity flex items-center gap-0.5 bg-white rounded p-0.5 border border-slate-200 shadow-2xs">
-                                {column.id !== 'backlog' && (
+                                {column.id !== 'backlog' && column.id !== 'paused' && (
                                   <button
                                     onClick={(e) => {
                                       e.stopPropagation();
@@ -480,6 +502,7 @@ export const KanbanBoard: React.FC<KanbanBoardProps> = ({
                                         'in_progress',
                                         'review',
                                         'done',
+                                        'paused',
                                       ];
                                       const currIdx = statuses.indexOf(column.id);
                                       onUpdateTaskStatus(task.id, statuses[currIdx - 1]);
@@ -490,7 +513,7 @@ export const KanbanBoard: React.FC<KanbanBoardProps> = ({
                                     <ArrowLeft className="w-3 h-3" />
                                   </button>
                                 )}
-                                {column.id !== 'done' && (
+                                {column.id !== 'done' && column.id !== 'paused' && (
                                   <button
                                     onClick={(e) => {
                                       e.stopPropagation();
@@ -500,6 +523,7 @@ export const KanbanBoard: React.FC<KanbanBoardProps> = ({
                                         'in_progress',
                                         'review',
                                         'done',
+                                        'paused',
                                       ];
                                       const currIdx = statuses.indexOf(column.id);
                                       onUpdateTaskStatus(task.id, statuses[currIdx + 1]);
@@ -648,6 +672,7 @@ export const KanbanBoard: React.FC<KanbanBoardProps> = ({
                   <span>快速发表至 {column.title.split(' ')[0]}</span>
                 </button>
               </div>
+              </React.Fragment>
             );
           })}
         </div>

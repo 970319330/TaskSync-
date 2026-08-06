@@ -118,35 +118,6 @@ export const INITIAL_PROJECTS: Project[] = [
     color: 'emerald',
     memberIds: ['usr_alex', 'usr_sarah', 'usr_david', 'usr_emma', 'usr_ai'],
     template: 'scrum',
-    milestones: [
-      {
-        id: 'ms_cloud_1',
-        projectId: 'proj_cloud',
-        title: 'M1: 架构设计与新建向导',
-        description: '确定项目模版预设、基础数据模型与流程向导设计',
-        dueDate: '2026-08-16',
-        status: 'in_progress',
-        color: 'emerald',
-      },
-      {
-        id: 'ms_cloud_2',
-        projectId: 'proj_cloud',
-        title: 'M2: 任务分解与依赖关联',
-        description: '任务 Blocks/Blocked by 图谱建模与甘特图关联线交互',
-        dueDate: '2026-08-22',
-        status: 'planned',
-        color: 'blue',
-      },
-      {
-        id: 'ms_cloud_3',
-        projectId: 'proj_cloud',
-        title: 'M3: 质量门禁与全量交付',
-        description: '状态流转角色防护与 MVP v2.4 版本线发包上线',
-        dueDate: '2026-08-30',
-        status: 'planned',
-        color: 'purple',
-      },
-    ],
   }
 ];
 
@@ -160,7 +131,6 @@ export const INITIAL_TASKS: Task[] = [
     assigneeIds: ['usr_alex', 'usr_emma'],
     reporterId: 'usr_alex',
     projectId: 'proj_cloud',
-    milestoneId: 'ms_cloud_1',
     startDate: '2026-08-08',
     dueDate: '2026-08-16',
     estimatedHours: 20,
@@ -196,7 +166,6 @@ export const INITIAL_TASKS: Task[] = [
     assigneeIds: ['usr_sarah', 'usr_david'],
     reporterId: 'usr_alex',
     projectId: 'proj_cloud',
-    milestoneId: 'ms_cloud_2',
     startDate: '2026-08-10',
     dueDate: '2026-08-20',
     estimatedHours: 28,
@@ -204,7 +173,7 @@ export const INITIAL_TASKS: Task[] = [
     tags: ['任务分解', '前置依赖', '甘特图联动', '阻断预警'],
     color: 'rose',
     checklist: [
-      { id: 'chk_o2_1', title: '扩展 Task 数据模型，新增 dependsOnTaskIds 与 blockedByTaskIds 属性', completed: false, assigneeId: 'usr_david' },
+      { id: 'chk_o2_1', title: '扩展 Task 数据模型，新增 dependsOnTaskIds 属性', completed: false, assigneeId: 'usr_david' },
       { id: 'chk_o2_2', title: '任务详情 Modal 增加“依赖关系”管理面板与关联搜索选择器', completed: false, assigneeId: 'usr_sarah' },
       { id: 'chk_o2_3', title: '看板卡片与甘特图中绘制依赖警示标记与阻断图标', completed: false, assigneeId: 'usr_sarah' }
     ],
@@ -223,7 +192,6 @@ export const INITIAL_TASKS: Task[] = [
     assigneeIds: ['usr_david', 'usr_alex'],
     reporterId: 'usr_alex',
     projectId: 'proj_cloud',
-    milestoneId: 'ms_cloud_3',
     startDate: '2026-08-12',
     dueDate: '2026-08-22',
     estimatedHours: 24,

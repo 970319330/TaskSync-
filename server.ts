@@ -166,18 +166,11 @@ app.post('/api/projects', (req, res) => {
     color: data.color || 'emerald',
     memberIds: Array.isArray(data.memberIds) ? data.memberIds : [],
     template: data.template || 'custom',
-    milestones: Array.isArray(data.milestones)
-      ? data.milestones.map((m: any, idx: number) => ({
-          ...m,
-          id: m.id || `ms_${projectId}_${idx + 1}`,
-          projectId,
-        }))
-      : [],
   };
 
   projects = [...projects, newProject];
 
-  // If initial tasks are provided (from milestone templates)
+  // If initial tasks are provided
   if (Array.isArray(data.initialTasks) && data.initialTasks.length > 0) {
     const createdTasks: Task[] = data.initialTasks.map((t: any, idx: number) => {
       const now = new Date();
@@ -192,7 +185,6 @@ app.post('/api/projects', (req, res) => {
         assigneeIds: Array.isArray(t.assigneeIds) && t.assigneeIds.length > 0 ? t.assigneeIds : (newProject.memberIds.slice(0, 2)),
         reporterId: t.reporterId || (newProject.memberIds[0] || 'usr_alex'),
         projectId,
-        milestoneId: t.milestoneId || undefined,
         startDate: t.startDate || nowIso.split('T')[0],
         dueDate: t.dueDate || new Date(now.getTime() + 7 * 86400000).toISOString().split('T')[0],
         estimatedHours: t.estimatedHours || 8,
@@ -237,7 +229,6 @@ app.put('/api/projects/:id', (req, res) => {
         ...(updates.color !== undefined ? { color: updates.color } : {}),
         ...(Array.isArray(updates.memberIds) ? { memberIds: updates.memberIds } : {}),
         ...(updates.template !== undefined ? { template: updates.template } : {}),
-        ...(Array.isArray(updates.milestones) ? { milestones: updates.milestones } : {}),
       };
       return updated;
     }
@@ -569,9 +560,7 @@ app.post('/api/tasks', (req, res) => {
     assigneeIds: newTaskData.assigneeIds || [],
     reporterId: newTaskData.reporterId || 'usr_alex',
     projectId: newTaskData.projectId || 'proj_cloud',
-    milestoneId: newTaskData.milestoneId || undefined,
     parentId: newTaskData.parentId || undefined,
-    blockedByTaskIds: Array.isArray(newTaskData.blockedByTaskIds) ? newTaskData.blockedByTaskIds : [],
     startDate: newTaskData.startDate || nowStr.substring(0, 10),
     dueDate: newTaskData.dueDate || nowStr.substring(0, 10),
     estimatedHours: Number(newTaskData.estimatedHours) || 8,

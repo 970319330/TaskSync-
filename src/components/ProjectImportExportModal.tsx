@@ -308,9 +308,11 @@ export const ProjectImportExportModal: React.FC<ProjectImportExportModalProps> =
         }),
       });
 
-      const data = await res.json();
+      // 安全解析响应：防止空响应体（如服务未启动/路由 404）导致 json() 崩溃
+      const text = await res.text();
+      const data = text ? JSON.parse(text) : {};
       if (!res.ok || !data.success) {
-        throw new Error(data.error || '导入失败，请重试');
+        throw new Error(data.error || `导入失败 (HTTP ${res.status})，请确认服务已启动最新版本`);
       }
 
       onImportSuccess(data.project, data.projects, data.tasks);

@@ -120,6 +120,7 @@ export const TaskDetailModal: React.FC<TaskDetailModalProps> = ({
               <option value="backlog">Backlog 积压</option>
               <option value="todo">待办 (To Do)</option>
               <option value="in_progress">进行中 (In Progress)</option>
+              <option value="paused">已暂停 (Paused)</option>
               <option value="review">测试 (Test)</option>
               <option value="done">已完成 (Done)</option>
             </select>

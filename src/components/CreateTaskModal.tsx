@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import { Member, Project, Task, TaskPriority, TaskStatus, ChecklistItem, Role, TaskColorKey, TASK_COLORS } from '../types';
 import { hasPermission } from '../permissions';
-import { X, Sparkles, Plus, Loader2, CheckSquare, Palette, GitFork, Link2 } from 'lucide-react';
+import { X, Sparkles, Plus, Loader2, CheckSquare, Palette, GitFork } from 'lucide-react';
 import { RichTextEditor } from './RichTextEditor';
 
 interface CreateTaskModalProps {
@@ -21,9 +21,7 @@ interface CreateTaskModalProps {
     priority: TaskPriority;
     assigneeIds: string[];
     projectId: string;
-    milestoneId?: string;
     parentId?: string;
-    blockedByTaskIds?: string[];
     startDate: string;
     dueDate: string;
     estimatedHours: number;
@@ -53,11 +51,7 @@ export const CreateTaskModal: React.FC<CreateTaskModalProps> = ({
   const [priority, setPriority] = useState<TaskPriority>('medium');
   const [selectedAssigneeIds, setSelectedAssigneeIds] = useState<string[]>([]);
   const [projectId, setProjectId] = useState(activeProject.id);
-  const [milestoneId, setMilestoneId] = useState<string>(
-    activeProject.milestones?.[0]?.id || ''
-  );
   const [parentId, setParentId] = useState<string>(initialParentId || '');
-  const [blockedByTaskIds, setBlockedByTaskIds] = useState<string[]>([]);
   const [startDate, setStartDate] = useState('2026-08-03');
   const [dueDate, setDueDate] = useState('2026-08-08');
   const [estimatedHours, setEstimatedHours] = useState(8);
@@ -171,9 +165,7 @@ export const CreateTaskModal: React.FC<CreateTaskModalProps> = ({
       priority,
       assigneeIds: finalAssigneeIds,
       projectId,
-      milestoneId: milestoneId || undefined,
       parentId: parentId || undefined,
-      blockedByTaskIds: blockedByTaskIds.length > 0 ? blockedByTaskIds : undefined,
       startDate,
       dueDate,
       estimatedHours,
@@ -307,26 +299,25 @@ export const CreateTaskModal: React.FC<CreateTaskModalProps> = ({
             </div>
 
             {/* Right Column: Task Attributes Sidebar (5 cols) */}
-            <div className="lg:col-span-5 bg-slate-50/90 p-5 rounded-2xl border border-slate-200/90 space-y-5 shadow-2xs">
-              <div className="flex items-center justify-between border-b border-slate-200 pb-3">
+            <div className="lg:col-span-5 bg-slate-50/90 p-4 rounded-2xl border border-slate-200/90 space-y-3 shadow-2xs">
+              <div className="flex items-center justify-between border-b border-slate-200 pb-2">
                 <h3 className="text-xs font-bold text-slate-800 uppercase tracking-wider flex items-center gap-1.5">
                   <span>⚙️ 属性分配与管理</span>
                 </h3>
                 <span className="text-[11px] text-slate-400 font-mono">TASK CONFIG</span>
               </div>
 
-              {/* Project & Milestone */}
-              <div className="grid grid-cols-2 gap-3.5 text-xs">
-                <div>
+              {/* Project / Parent Task / Status / Priority - 2 cols grid */}
+              <div className="grid grid-cols-2 gap-3">
+                {/* Project */}
+                <div className="text-xs">
                   <label className="text-slate-700 font-semibold block mb-1">所属项目</label>
                   <select
                     value={projectId}
                     onChange={(e) => {
                       setProjectId(e.target.value);
-                      const selP = projects.find((p) => p.id === e.target.value);
-                      setMilestoneId(selP?.milestones?.[0]?.id || '');
                     }}
-                    className="w-full bg-white border border-slate-200 rounded-xl p-2.5 text-slate-800 focus:outline-none focus:border-emerald-500 cursor-pointer shadow-2xs font-medium"
+                    className="w-full bg-white border border-slate-200 rounded-xl p-2 text-slate-800 focus:outline-none focus:border-emerald-500 cursor-pointer shadow-2xs font-medium"
                   >
                     {projects.map((p) => (
                       <option key={p.id} value={p.id}>
@@ -336,30 +327,8 @@ export const CreateTaskModal: React.FC<CreateTaskModalProps> = ({
                   </select>
                 </div>
 
-                <div>
-                  <label className="text-slate-700 font-semibold block mb-1">关联里程碑 (Milestone)</label>
-                  <select
-                    value={milestoneId}
-                    onChange={(e) => setMilestoneId(e.target.value)}
-                    className="w-full bg-white border border-slate-200 rounded-xl p-2.5 text-slate-800 focus:outline-none focus:border-emerald-500 cursor-pointer shadow-2xs font-medium"
-                  >
-                    <option value="">未关联里程碑</option>
-                    {(
-                      projects.find((p) => p.id === projectId)?.milestones ||
-                      activeProject.milestones ||
-                      []
-                    ).map((m) => (
-                      <option key={m.id} value={m.id}>
-                        🚩 {m.title}
-                      </option>
-                    ))}
-                  </select>
-                </div>
-              </div>
-
-              {/* Parent Task & Predecessor Dependencies */}
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3.5 text-xs">
-                <div>
+                {/* Parent Task */}
+                <div className="text-xs">
                   <label className="text-slate-700 font-semibold block mb-1 flex items-center gap-1">
                     <GitFork className="w-3.5 h-3.5 text-indigo-600" />
                     <span>父级任务 (Parent Task)</span>
@@ -367,7 +336,7 @@ export const CreateTaskModal: React.FC<CreateTaskModalProps> = ({
                   <select
                     value={parentId}
                     onChange={(e) => setParentId(e.target.value)}
-                    className="w-full bg-white border border-slate-200 rounded-xl p-2.5 text-slate-800 focus:outline-none focus:border-emerald-500 cursor-pointer shadow-2xs font-medium"
+                    className="w-full bg-white border border-slate-200 rounded-xl p-2 text-slate-800 focus:outline-none focus:border-emerald-500 cursor-pointer shadow-2xs font-medium"
                   >
                     <option value="">无 (独立主任务)</option>
                     {allTasks
@@ -380,68 +349,46 @@ export const CreateTaskModal: React.FC<CreateTaskModalProps> = ({
                   </select>
                 </div>
 
+                {/* Status */}
                 <div>
-                  <label className="text-slate-700 font-semibold block mb-1 flex items-center gap-1">
-                    <Link2 className="w-3.5 h-3.5 text-amber-600" />
-                    <span>前置依赖任务 (Blocked By)</span>
-                  </label>
+                  <label className="text-slate-700 font-semibold block mb-1 text-xs">初始状态</label>
                   <select
-                    value={blockedByTaskIds[0] || ''}
-                    onChange={(e) => {
-                      const val = e.target.value;
-                      setBlockedByTaskIds(val ? [val] : []);
-                    }}
-                    className="w-full bg-white border border-slate-200 rounded-xl p-2.5 text-slate-800 focus:outline-none focus:border-emerald-500 cursor-pointer shadow-2xs font-medium"
+                    value={status}
+                    onChange={(e) => setStatus(e.target.value as TaskStatus)}
+                    className="w-full bg-white border border-slate-200 rounded-xl p-2 text-xs text-slate-800 focus:outline-none focus:border-emerald-500 cursor-pointer shadow-2xs font-medium"
                   >
-                    <option value="">无前置依赖 (随时可启动)</option>
-                    {allTasks.map((t) => (
-                      <option key={t.id} value={t.id}>
-                        🚫 [{t.id}] {t.title} ({t.status === 'done' ? '已完成' : '未完成'})
-                      </option>
-                    ))}
+                    <option value="backlog">Backlog 积压</option>
+                    <option value="todo">待办 (To Do)</option>
+                    <option value="in_progress">进行中 (In Progress)</option>
+                    <option value="review">测试 (Test)</option>
+                    <option value="done">已完成 (Done)</option>
+                  </select>
+                </div>
+
+                {/* Priority */}
+                <div>
+                  <label className="text-xs font-semibold text-slate-700 block mb-1">优先级</label>
+                  <select
+                    value={priority}
+                    onChange={(e) => setPriority(e.target.value as TaskPriority)}
+                    className="w-full bg-white border border-slate-200 rounded-xl p-2 text-xs text-slate-800 focus:outline-none focus:border-emerald-500 cursor-pointer shadow-2xs font-medium"
+                  >
+                    <option value="urgent">🔴 紧急 (Urgent)</option>
+                    <option value="high">🟠 高级 (High)</option>
+                    <option value="medium">🔵 中等 (Medium)</option>
+                    <option value="low">⚪ 低级 (Low)</option>
                   </select>
                 </div>
               </div>
 
-              {/* Status */}
-              <div>
-                <label className="text-slate-700 font-semibold block mb-1 text-xs">初始状态</label>
-                <select
-                  value={status}
-                  onChange={(e) => setStatus(e.target.value as TaskStatus)}
-                  className="w-full bg-white border border-slate-200 rounded-xl p-2.5 text-xs text-slate-800 focus:outline-none focus:border-emerald-500 cursor-pointer shadow-2xs font-medium"
-                >
-                  <option value="backlog">Backlog 积压</option>
-                  <option value="todo">待办 (To Do)</option>
-                  <option value="in_progress">进行中 (In Progress)</option>
-                  <option value="review">测试 (Test)</option>
-                  <option value="done">已完成 (Done)</option>
-                </select>
-              </div>
-
-              {/* Priority */}
-              <div>
-                <label className="text-xs font-semibold text-slate-700 block mb-1">优先级</label>
-                <select
-                  value={priority}
-                  onChange={(e) => setPriority(e.target.value as TaskPriority)}
-                  className="w-full bg-white border border-slate-200 rounded-xl p-2.5 text-xs text-slate-800 focus:outline-none focus:border-emerald-500 cursor-pointer shadow-2xs font-medium"
-                >
-                  <option value="urgent">🔴 紧急 (Urgent)</option>
-                  <option value="high">🟠 高级 (High)</option>
-                  <option value="medium">🔵 中等 (Medium)</option>
-                  <option value="low">⚪ 低级 (Low)</option>
-                </select>
-              </div>
-
               {/* 任务颜色标记 */}
               <div>
-                <label className="text-xs font-semibold text-slate-700 block mb-1.5 flex items-center gap-1.5">
+                <label className="text-xs font-semibold text-slate-700 block mb-1 flex items-center gap-1.5">
                   <Palette className="w-3.5 h-3.5 text-emerald-600" />
                   <span>任务颜色标记</span>
                   <span className="text-[10px] text-slate-400 font-normal">（用于看板 / 列表卡片视觉标签）</span>
                 </label>
-                <div className="flex flex-wrap gap-1.5 bg-white border border-slate-200 rounded-xl p-2 shadow-2xs">
+                <div className="flex flex-wrap gap-1.5 bg-white border border-slate-200 rounded-xl p-1.5 shadow-2xs">
                   {TASK_COLORS.map((opt) => {
                     const isSelected = color === opt.key;
                     return (
@@ -468,11 +415,11 @@ export const CreateTaskModal: React.FC<CreateTaskModalProps> = ({
 
               {/* Assignees */}
               <div>
-                <label className="text-xs font-semibold text-slate-700 block mb-2">
+                <label className="text-xs font-semibold text-slate-700 block mb-1.5">
                   指派开发经办人
                   {!canAssignTask && <span className="ml-2 text-[10px] text-amber-600 font-normal">（当前角色无指派权限）</span>}
                 </label>
-                <div className="flex flex-wrap gap-2 max-h-40 overflow-y-auto p-1">
+                <div className="flex flex-wrap gap-2 max-h-32 overflow-y-auto p-1">
                   {(members || []).map((m) => {
                     const isSelected = selectedAssigneeIds.includes(m.id);
                     return (
@@ -498,7 +445,7 @@ export const CreateTaskModal: React.FC<CreateTaskModalProps> = ({
               </div>
 
               {/* Workflow & QA Transition Settings */}
-              <div className="bg-indigo-50/70 border border-indigo-150 rounded-2xl p-3.5 space-y-3">
+              <div className="bg-indigo-50/70 border border-indigo-150 rounded-2xl p-3 space-y-2">
                 <div className="flex items-center justify-between">
                   <label className="text-xs font-bold text-indigo-950 flex items-center gap-1.5">
                     <span>🔄 阶段流转规则设置</span>
@@ -541,14 +488,14 @@ export const CreateTaskModal: React.FC<CreateTaskModalProps> = ({
               </div>
 
               {/* Dates */}
-              <div className="grid grid-cols-2 gap-3.5 text-xs">
+              <div className="grid grid-cols-2 gap-3 text-xs">
                 <div>
                   <label className="text-slate-700 font-semibold block mb-1">开始日期</label>
                   <input
                     type="date"
                     value={startDate}
                     onChange={(e) => setStartDate(e.target.value)}
-                    className="w-full bg-white border border-slate-200 rounded-xl p-2.5 text-slate-800 focus:outline-none focus:border-emerald-500 shadow-2xs"
+                    className="w-full bg-white border border-slate-200 rounded-xl p-2 text-slate-800 focus:outline-none focus:border-emerald-500 shadow-2xs"
                   />
                 </div>
 
@@ -558,20 +505,20 @@ export const CreateTaskModal: React.FC<CreateTaskModalProps> = ({
                     type="date"
                     value={dueDate}
                     onChange={(e) => setDueDate(e.target.value)}
-                    className="w-full bg-white border border-slate-200 rounded-xl p-2.5 text-slate-800 focus:outline-none focus:border-emerald-500 shadow-2xs"
+                    className="w-full bg-white border border-slate-200 rounded-xl p-2 text-slate-800 focus:outline-none focus:border-emerald-500 shadow-2xs"
                   />
                 </div>
               </div>
 
               {/* Hours & Tags */}
-              <div className="grid grid-cols-2 gap-3.5 text-xs">
+              <div className="grid grid-cols-2 gap-3 text-xs">
                 <div>
                   <label className="text-slate-700 font-semibold block mb-1">工时估算 (小时)</label>
                   <input
                     type="number"
                     value={estimatedHours}
                     onChange={(e) => setEstimatedHours(Number(e.target.value))}
-                    className="w-full bg-white border border-slate-200 rounded-xl p-2.5 text-slate-800 focus:outline-none focus:border-emerald-500 font-mono shadow-2xs"
+                    className="w-full bg-white border border-slate-200 rounded-xl p-2 text-slate-800 focus:outline-none focus:border-emerald-500 font-mono shadow-2xs"
                   />
                 </div>
 
@@ -582,7 +529,7 @@ export const CreateTaskModal: React.FC<CreateTaskModalProps> = ({
                     value={tagInput}
                     onChange={(e) => setTagInput(e.target.value)}
                     placeholder="前端, API, 核心"
-                    className="w-full bg-white border border-slate-200 rounded-xl p-2.5 text-slate-800 focus:outline-none focus:border-emerald-500 shadow-2xs"
+                    className="w-full bg-white border border-slate-200 rounded-xl p-2 text-slate-800 focus:outline-none focus:border-emerald-500 shadow-2xs"
                   />
                 </div>
               </div>

@@ -1,4 +1,10 @@
-export type TaskStatus = 'backlog' | 'todo' | 'in_progress' | 'review' | 'done';
+export type TaskStatus =
+  | 'backlog'
+  | 'todo'
+  | 'in_progress'
+  | 'paused'   // 暂停搁置（原因消除后可恢复继续）
+  | 'review'
+  | 'done';
 
 export type TaskPriority = 'urgent' | 'high' | 'medium' | 'low';
 
@@ -130,16 +136,6 @@ export interface TaskFeedback {
   createdAt: string;
 }
 
-export interface Milestone {
-  id: string;
-  projectId: string;
-  title: string;
-  description?: string;
-  dueDate: string;
-  status: 'planned' | 'in_progress' | 'completed' | 'delayed';
-  color?: string;
-}
-
 export interface Task {
   id: string;
   title: string;
@@ -149,7 +145,6 @@ export interface Task {
   assigneeIds: string[];
   reporterId: string;
   projectId: string;
-  milestoneId?: string;
   dueDate: string;
   startDate: string;
   estimatedHours: number;
@@ -168,8 +163,10 @@ export interface Task {
   color?: string;
   // 父子任务结构：父任务 ID (可选)
   parentId?: string;
-  // 前置依赖关系：阻塞当前任务的前置任务 ID 列表 (Blocked By)
-  blockedByTaskIds?: string[];
+  // 暂停/阻塞原因记录（状态为 paused/blocked 时填写）
+  pausedReason?: string;
+  // 暂停时间戳，用于统计搁置时长
+  pausedAt?: string;
   // 来源禅道账号（从禅道同步的任务才有，用于多账号隔离）
   zentaoAccount?: string;
   createdAt: string;
@@ -184,7 +181,6 @@ export interface Project {
   color: string;
   memberIds: string[];
   template?: string;
-  milestones?: Milestone[];
 }
 
 export interface ChatMessage {

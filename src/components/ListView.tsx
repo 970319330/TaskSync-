@@ -17,7 +17,6 @@ import {
   ChevronRight,
   ChevronDown,
   CornerDownRight,
-  ShieldAlert,
 } from 'lucide-react';
 
 interface ListViewProps {
@@ -182,6 +181,7 @@ export const ListView: React.FC<ListViewProps> = ({
     backlog: { label: 'Backlog', color: 'bg-slate-100 text-slate-700 border-slate-300' },
     todo: { label: '待办', color: 'bg-blue-100 text-blue-700 border-blue-300' },
     in_progress: { label: '进行中', color: 'bg-amber-100 text-amber-700 border-amber-300' },
+    paused: { label: '已暂停', color: 'bg-orange-100 text-orange-700 border-orange-300' },
     review: { label: '测试', color: 'bg-purple-100 text-purple-700 border-purple-300' },
     done: { label: '已完成', color: 'bg-emerald-100 text-emerald-700 border-emerald-300' },
   };
@@ -314,14 +314,10 @@ export const ListView: React.FC<ListViewProps> = ({
             <tbody className="divide-y divide-slate-100 text-xs text-slate-700">
               {pagedDisplay.map(({ task, depth, hasChildren }) => {
                 const isSelected = selectedTaskIds.includes(task.id);
-                const st = statusMap[task.status];
+                const st = statusMap[task.status] || { label: task.status, color: 'bg-slate-100 text-slate-600 border-slate-300' };
                 const taskColor = getTaskColor(task.color);
 
                 const childCount = (tasks || []).filter((c) => c.parentId === task.id).length;
-                const blockers = (task.blockedByTaskIds || [])
-                  .map((id) => tasks.find((t) => t.id === id))
-                  .filter(Boolean) as Task[];
-                const incompleteBlockers = blockers.filter((b) => b.status !== 'done');
 
                 return (
                   <tr
@@ -385,17 +381,6 @@ export const ListView: React.FC<ListViewProps> = ({
                         {childCount > 0 && (
                           <span className="text-[10px] bg-indigo-50 text-indigo-800 border border-indigo-200 px-1.5 py-0.2 rounded font-semibold flex items-center gap-0.5">
                             🌿 {childCount}个子任务
-                          </span>
-                        )}
-
-                        {incompleteBlockers.length > 0 ? (
-                          <span className="text-[10px] bg-rose-50 text-rose-800 border border-rose-300 px-1.5 py-0.2 rounded font-semibold flex items-center gap-1">
-                            <ShieldAlert className="w-3 h-3 text-rose-600 shrink-0" />
-                            被 [{incompleteBlockers.map((b) => b.id).join(', ')}] 阻塞
-                          </span>
-                        ) : (task.blockedByTaskIds || []).length > 0 && (
-                          <span className="text-[10px] bg-emerald-50 text-emerald-800 border border-emerald-300 px-1.5 py-0.2 rounded font-medium">
-                            ✅ 依赖已解锁
                           </span>
                         )}
 

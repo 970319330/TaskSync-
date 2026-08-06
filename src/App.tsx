@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react';
+import { createPortal } from 'react-dom';
 import {
   Member,
   Project,
@@ -12,7 +13,6 @@ import {
   AiSettings,
   AiProvider,
   Role,
-  Milestone,
 } from './types';
 import { Navbar } from './components/Navbar';
 import { MemberPresenceBar } from './components/MemberPresenceBar';
@@ -32,9 +32,9 @@ import { AiCopilotDrawer } from './components/AiCopilotDrawer';
 import { Login } from './components/Login';
 import { ZentaoSyncModal } from './components/ZentaoSyncModal';
 import { ProjectImportExportModal } from './components/ProjectImportExportModal';
-import { hasPermission } from './permissions';
+import { hasPermission, canTransitionTaskStatus } from './permissions';
 import logoUrl from './assets/logo.png';
-import { Loader2 } from 'lucide-react';
+import { Loader2, CheckCircle2, Plus } from 'lucide-react';
 
 export default function App() {
   const [loading, setLoading] = useState(true);
@@ -108,6 +108,8 @@ export default function App() {
   const [showImportExportModal, setShowImportExportModal] = useState(false);
   const [importExportTab, setImportExportTab] = useState<'import' | 'export'>('export');
   const [importExportProjectId, setImportExportProjectId] = useState<string | undefined>(undefined);
+  // 完成任务二次确认：暂存待确认完成的任务 ID
+  const [pendingDoneTask, setPendingDoneTask] = useState<string | null>(null);
 
   const handleOpenImportExport = (tab: 'import' | 'export' = 'export', projectId?: string) => {
     setImportExportTab(tab);
@@ -223,9 +225,15 @@ export default function App() {
     }
   }, [isZentaoSession, projects, tasks, currentMember, activeProject]);
 
-  // Update Task Status
-  const handleUpdateTaskStatus = async (taskId: string, newStatus: TaskStatus) => {
-    // Optimistic UI update
+  // 实际执行任务状态变更（无确认拦截）
+  const doUpdateTaskStatus = async (taskId: string, newStatus: TaskStatus) => {
+    // 状态流转合法性校验
+    const task = tasks.find((t) => t.id === taskId);
+    if (task && !canTransitionTaskStatus(task.status, newStatus)) {
+      console.warn(`[状态机] 非法流转: ${task.status} -> ${newStatus}，已拦截`);
+      return;
+    }
+
     setTasks((prev) =>
       prev.map((t) => (t.id === taskId ? { ...t, status: newStatus } : t))
     );
@@ -244,6 +252,22 @@ export default function App() {
     } catch (err) {
       console.error('Failed to update task status:', err);
     }
+  };
+
+  // Update Task Status（完成任务需二次确认）
+  const handleUpdateTaskStatus = async (taskId: string, newStatus: TaskStatus) => {
+    if (newStatus === 'done') {
+      setPendingDoneTask(taskId);
+      return;
+    }
+    return doUpdateTaskStatus(taskId, newStatus);
+  };
+
+  // 确认完成任务
+  const confirmDoneTask = () => {
+    const taskId = pendingDoneTask;
+    setPendingDoneTask(null);
+    if (taskId) doUpdateTaskStatus(taskId, 'done');
   };
 
   // Update Task Priority
@@ -271,6 +295,14 @@ export default function App() {
   // Update Task Details (from modal)
   const handleUpdateTask = async (updatedFields: Partial<Task>) => {
     if (!selectedTask) return;
+
+    // 状态流转合法性校验（若更新中包含 status 字段）
+    if (updatedFields.status && updatedFields.status !== selectedTask.status) {
+      if (!canTransitionTaskStatus(selectedTask.status, updatedFields.status)) {
+        console.warn(`[状态机] 非法流转: ${selectedTask.status} -> ${updatedFields.status}，已拦截`);
+        return;
+      }
+    }
 
     setTasks((prev) =>
       prev.map((t) => (t.id === selectedTask.id ? { ...t, ...updatedFields } : t))
@@ -338,7 +370,6 @@ export default function App() {
     color: string;
     memberIds: string[];
     template?: string;
-    milestones?: Milestone[];
     initialTasks?: any[];
   }, importContent?: string) => {
     try {
@@ -588,16 +619,77 @@ export default function App() {
     return <Login members={members} roles={roles} onLogin={handleLogin} />;
   }
 
-  // 已登录但项目数据未就绪
-  if (!activeProject || !activeChannel) {
-    return (
-      <div className="min-h-screen bg-slate-50 text-slate-900 flex items-center justify-center p-6">
-        <div className="flex flex-col items-center gap-3 text-emerald-600">
-          <Loader2 className="w-8 h-8 animate-spin" />
-          <span className="text-sm font-semibold tracking-wide">准备协作空间...</span>
+  // 已登录但无项目：显示空状态页，提供创建项目入口
+  if (!activeProject) {
+    // 有项目数据但 activeProject 未设置（禅道会话过滤等场景），尝试取第一个
+    const fallbackProject = projects[0];
+    if (fallbackProject) {
+      setActiveProject(fallbackProject);
+    } else {
+      return (
+        <div className="min-h-screen bg-slate-50 text-slate-900 flex items-center justify-center p-6">
+          <div className="flex flex-col items-center gap-4 max-w-sm text-center">
+            <img src={logoUrl} alt="牛磨 Logo" className="w-16 h-16 object-contain opacity-80" />
+            <div className="space-y-1">
+              <h2 className="text-lg font-bold text-slate-800">还没有可用的项目空间</h2>
+              <p className="text-xs text-slate-500">创建你的第一个项目，或导入禅道任务开始协作</p>
+            </div>
+            <div className="flex flex-col gap-2 w-full pt-2">
+              <button
+                onClick={() => setShowCreateProjectModal(true)}
+                className="flex items-center justify-center gap-2 bg-emerald-600 hover:bg-emerald-500 text-white px-4 py-2.5 rounded-xl text-xs font-bold shadow-md transition-all cursor-pointer"
+              >
+                <Plus className="w-4 h-4" />
+                <span>创建新项目</span>
+              </button>
+              <button
+                onClick={() => setShowZentaoSyncModal(true)}
+                className="flex items-center justify-center gap-2 bg-white hover:bg-slate-50 border border-slate-300 text-slate-700 px-4 py-2.5 rounded-xl text-xs font-semibold transition-all cursor-pointer"
+              >
+                <span>从禅道同步导入</span>
+              </button>
+              <button
+                onClick={handleLogout}
+                className="text-[11px] text-slate-400 hover:text-slate-600 mt-2 cursor-pointer"
+              >
+                退出登录
+              </button>
+            </div>
+          </div>
+          {/* 空状态页面也需要渲染创建项目/禅道同步弹窗 */}
+          {showCreateProjectModal && (
+            <CreateProjectModal
+              members={members}
+              onClose={() => setShowCreateProjectModal(false)}
+              onSubmit={handleCreateProject}
+            />
+          )}
+          {showZentaoSyncModal && (
+            <ZentaoSyncModal
+              onClose={() => setShowZentaoSyncModal(false)}
+              onImport={handleZentaoImport}
+            />
+          )}
         </div>
-      </div>
-    );
+      );
+    }
+  }
+
+  // 项目存在但频道未就绪：自动取第一个
+  if (!activeChannel) {
+    const fallbackChannel = channels[0];
+    if (fallbackChannel) {
+      setActiveChannel(fallbackChannel);
+    } else {
+      return (
+        <div className="min-h-screen bg-slate-50 text-slate-900 flex items-center justify-center p-6">
+          <div className="flex flex-col items-center gap-3 text-emerald-600">
+            <Loader2 className="w-8 h-8 animate-spin" />
+            <span className="text-sm font-semibold tracking-wide">准备协作空间...</span>
+          </div>
+        </div>
+      );
+    }
   }
 
   // Filter tasks for current active project（基于已过滤的 visibleTasks）
@@ -870,6 +962,50 @@ export default function App() {
           onClose={() => setShowZentaoSyncModal(false)}
           onImport={handleZentaoImport}
         />
+      )}
+
+      {/* 完成任务二次确认弹窗（Portal 到 body，避免祖先 transform 影响 fixed 定位） */}
+      {pendingDoneTask && createPortal(
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm"
+          onClick={() => setPendingDoneTask(null)}
+        >
+          <div
+            className="bg-white rounded-3xl shadow-2xl p-6 max-w-sm w-full mx-4 space-y-4"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="flex items-center gap-3">
+              <div className="w-10 h-10 rounded-full bg-emerald-100 flex items-center justify-center shrink-0">
+                <CheckCircle2 className="w-5 h-5 text-emerald-600" />
+              </div>
+              <div>
+                <h3 className="font-bold text-slate-900 text-sm">确认完成任务</h3>
+                <p className="text-xs text-slate-500 mt-0.5">任务标记为完成后将进入已归档状态</p>
+              </div>
+            </div>
+            <div className="bg-slate-50 rounded-xl p-3 text-xs text-slate-700">
+              <span className="text-slate-400">任务名称：</span>
+              <span className="font-semibold">
+                {tasks.find((t) => t.id === pendingDoneTask)?.title || pendingDoneTask}
+              </span>
+            </div>
+            <div className="flex gap-2 pt-2">
+              <button
+                onClick={() => setPendingDoneTask(null)}
+                className="flex-1 bg-slate-100 hover:bg-slate-200 text-slate-700 px-4 py-2.5 rounded-xl text-xs font-semibold transition-colors cursor-pointer"
+              >
+                取消
+              </button>
+              <button
+                onClick={confirmDoneTask}
+                className="flex-1 bg-emerald-600 hover:bg-emerald-500 text-white px-4 py-2.5 rounded-xl text-xs font-semibold transition-colors cursor-pointer shadow-xs"
+              >
+                确认完成
+              </button>
+            </div>
+          </div>
+        </div>,
+        document.body
       )}
 
     </div>

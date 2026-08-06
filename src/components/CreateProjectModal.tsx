@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { Member, Milestone, TaskPriority } from '../types';
+import { Member } from '../types';
 import { PROJECT_TEMPLATES, ProjectTemplate } from '../data/projectTemplates';
 import {
   X,
@@ -12,15 +12,10 @@ import {
   Loader2,
   ArrowRight,
   ArrowLeft,
-  Calendar,
   Kanban,
   Bug,
   Megaphone,
   FolderKanban,
-  Flag,
-  Trash2,
-  Clock,
-  CheckCircle2,
 } from 'lucide-react';
 
 interface CreateProjectModalProps {
@@ -34,7 +29,6 @@ interface CreateProjectModalProps {
       color: string;
       memberIds: string[];
       template?: string;
-      milestones?: Milestone[];
       initialTasks?: any[];
     },
     importContent?: string
@@ -57,7 +51,7 @@ export const CreateProjectModal: React.FC<CreateProjectModalProps> = ({
   onClose,
   onSubmit,
 }) => {
-  const [currentStep, setCurrentStep] = useState<1 | 2 | 3>(1);
+  const [currentStep, setCurrentStep] = useState<1 | 2>(1);
   const [selectedTemplateId, setSelectedTemplateId] = useState<string>('scrum');
 
   const [name, setName] = useState('');
@@ -67,20 +61,6 @@ export const CreateProjectModal: React.FC<CreateProjectModalProps> = ({
   const [selectedMemberIds, setSelectedMemberIds] = useState<string[]>(
     members.map((m) => m.id)
   );
-
-  // Milestone Editing state
-  const [milestones, setMilestones] = useState<
-    {
-      id: string;
-      title: string;
-      description: string;
-      dueDate: string;
-      color: string;
-      defaultTasks: any[];
-    }[]
-  >([]);
-
-  const [generateInitialTasks, setGenerateInitialTasks] = useState(true);
 
   // File import state
   const [importContent, setImportContent] = useState('');
@@ -112,22 +92,6 @@ export const CreateProjectModal: React.FC<CreateProjectModalProps> = ({
     if (!description) {
       setDescription(tpl.description);
     }
-
-    // Build milestone list with calculated dates
-    const today = new Date();
-    const formattedMs = tpl.defaultMilestones.map((m, idx) => {
-      const targetDate = new Date(today.getTime() + m.dayOffset * 86400000);
-      const dateStr = targetDate.toISOString().split('T')[0];
-      return {
-        id: `ms_init_${idx + 1}`,
-        title: m.title,
-        description: m.description,
-        dueDate: dateStr,
-        color: m.color || tpl.recommendedColor || 'emerald',
-        defaultTasks: m.defaultTasks || [],
-      };
-    });
-    setMilestones(formattedMs);
   };
 
   // Run initial template apply on load
@@ -167,34 +131,6 @@ export const CreateProjectModal: React.FC<CreateProjectModalProps> = ({
     setImportError('');
   };
 
-  // Milestone manipulations
-  const handleUpdateMilestone = (index: number, field: string, value: string) => {
-    setMilestones((prev) =>
-      prev.map((m, i) => (i === index ? { ...m, [field]: value } : m))
-    );
-  };
-
-  const handleAddMilestone = () => {
-    const nextNum = milestones.length + 1;
-    const today = new Date();
-    const targetDate = new Date(today.getTime() + nextNum * 7 * 86400000);
-    setMilestones((prev) => [
-      ...prev,
-      {
-        id: `ms_custom_${Date.now()}`,
-        title: `M${nextNum}: 自定义里程碑阶段`,
-        description: '请输入该阶段关键交付物与目标...',
-        dueDate: targetDate.toISOString().split('T')[0],
-        color: color || 'emerald',
-        defaultTasks: [],
-      },
-    ]);
-  };
-
-  const handleRemoveMilestone = (index: number) => {
-    setMilestones((prev) => prev.filter((_, i) => i !== index));
-  };
-
   const renderTemplateIcon = (iconName: string) => {
     switch (iconName) {
       case 'scrum':
@@ -216,35 +152,6 @@ export const CreateProjectModal: React.FC<CreateProjectModalProps> = ({
     setSubmitting(true);
 
     try {
-      // Build final milestones array
-      const finalMilestones: Milestone[] = milestones.map((m) => ({
-        id: m.id,
-        projectId: '',
-        title: m.title.trim(),
-        description: m.description,
-        dueDate: m.dueDate,
-        status: 'planned',
-        color: m.color,
-      }));
-
-      // Build initial preset tasks if enabled
-      let initialTasks: any[] = [];
-      if (generateInitialTasks) {
-        milestones.forEach((m) => {
-          m.defaultTasks.forEach((dt) => {
-            initialTasks.push({
-              title: dt.title,
-              description: dt.description,
-              priority: dt.priority || 'medium',
-              estimatedHours: dt.estimatedHours || 8,
-              tags: dt.tags || [],
-              milestoneId: m.id,
-              status: 'todo',
-            });
-          });
-        });
-      }
-
       await onSubmit(
         {
           name: name.trim(),
@@ -253,8 +160,6 @@ export const CreateProjectModal: React.FC<CreateProjectModalProps> = ({
           color,
           memberIds: selectedMemberIds,
           template: selectedTemplateId,
-          milestones: finalMilestones,
-          initialTasks,
         },
         importContent || undefined
       );
@@ -274,10 +179,10 @@ export const CreateProjectModal: React.FC<CreateProjectModalProps> = ({
             </div>
             <div>
               <h2 className="font-bold text-slate-900 text-base sm:text-lg flex items-center gap-2">
-                新建项目空间与里程碑向导
+                新建项目空间
               </h2>
               <p className="text-[11px] text-slate-500">
-                步骤 {currentStep} / 3: {currentStep === 1 ? '选择模版预设' : currentStep === 2 ? '配置项目基础信息' : '里程碑 (Milestones) 规划'}
+                步骤 {currentStep} / 2: {currentStep === 1 ? '选择模版预设' : '配置项目基础信息'}
               </p>
             </div>
           </div>
@@ -318,20 +223,6 @@ export const CreateProjectModal: React.FC<CreateProjectModalProps> = ({
             </span>
             <span>项目基础配置</span>
           </button>
-          <div className="h-0.5 w-8 bg-slate-300 hidden sm:block" />
-          <button
-            onClick={() => setCurrentStep(3)}
-            className={`flex items-center gap-2 px-3 py-1.5 rounded-lg transition-colors cursor-pointer ${
-              currentStep === 3
-                ? 'bg-white text-emerald-700 shadow-2xs font-bold'
-                : 'hover:text-slate-900'
-            }`}
-          >
-            <span className="w-5 h-5 rounded-full bg-emerald-100 text-emerald-800 flex items-center justify-center text-[10px] font-bold">
-              3
-            </span>
-            <span>里程碑 (Milestone) 向导</span>
-          </button>
         </div>
 
         <form onSubmit={handleSubmit} className="p-6 sm:p-8 space-y-6 max-h-[72vh] overflow-y-auto">
@@ -343,17 +234,13 @@ export const CreateProjectModal: React.FC<CreateProjectModalProps> = ({
                   选择项目模版 (Project Templates)
                 </h3>
                 <p className="text-xs text-slate-500">
-                  预设模版内置开箱即用的阶段里程碑 (Milestones) 与行业标准工作流任务。
+                  预设模版内置行业标准工作流配置，帮助快速启动项目。
                 </p>
               </div>
 
               <div className="grid grid-cols-1 md:grid-cols-2 gap-3.5">
                 {PROJECT_TEMPLATES.map((tpl) => {
                   const isSelected = selectedTemplateId === tpl.id;
-                  const tasksCount = tpl.defaultMilestones.reduce(
-                    (acc, m) => acc + m.defaultTasks.length,
-                    0
-                  );
                   return (
                     <div
                       key={tpl.id}
@@ -386,19 +273,6 @@ export const CreateProjectModal: React.FC<CreateProjectModalProps> = ({
                         <p className="text-xs text-slate-600 line-clamp-2 leading-relaxed mb-3">
                           {tpl.description}
                         </p>
-                      </div>
-
-                      {/* Milestone Summary Preview */}
-                      <div className="pt-2.5 border-t border-slate-200/80 flex items-center justify-between text-[11px] text-slate-500">
-                        <div className="flex items-center gap-1.5 font-medium">
-                          <Flag className="w-3.5 h-3.5 text-emerald-600" />
-                          <span>{tpl.defaultMilestones.length} 个预设里程碑</span>
-                        </div>
-                        {tasksCount > 0 && (
-                          <span className="bg-emerald-100 text-emerald-800 px-2 py-0.5 rounded font-semibold text-[10px]">
-                            预置 {tasksCount} 个示例任务
-                          </span>
-                        )}
                       </div>
 
                       {isSelected && (
@@ -582,170 +456,6 @@ export const CreateProjectModal: React.FC<CreateProjectModalProps> = ({
                 >
                   <ArrowLeft className="w-4 h-4" />
                   <span>上一步：选择模版</span>
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setCurrentStep(3)}
-                  disabled={!name.trim()}
-                  className="flex items-center gap-2 px-6 py-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-bold shadow-sm transition-all cursor-pointer disabled:opacity-50"
-                >
-                  <span>下一步：里程碑向导 ({milestones.length})</span>
-                  <ArrowRight className="w-4 h-4" />
-                </button>
-              </div>
-            </div>
-          )}
-
-          {/* STEP 3: 里程碑 (Milestones) 规划向导 */}
-          {currentStep === 3 && (
-            <div className="space-y-5">
-              <div className="flex items-center justify-between">
-                <div>
-                  <h3 className="text-sm font-bold text-slate-900 flex items-center gap-2">
-                    <Flag className="w-4 h-4 text-emerald-600" />
-                    阶段里程碑 (Milestones) 初始化与目标设置
-                  </h3>
-                  <p className="text-xs text-slate-500">
-                    为新项目设定关键阶段交付目标与完成日期，方便后续在大盘与甘特图中筛选。
-                  </p>
-                </div>
-                <button
-                  type="button"
-                  onClick={handleAddMilestone}
-                  className="flex items-center gap-1 px-3 py-1.5 rounded-xl bg-emerald-50 hover:bg-emerald-100 text-emerald-700 text-xs font-bold transition-colors cursor-pointer shrink-0"
-                >
-                  <Plus className="w-3.5 h-3.5" />
-                  <span>新增里程碑</span>
-                </button>
-              </div>
-
-              {/* Toggle option to generate tasks */}
-              <div className="bg-emerald-50/60 border border-emerald-200 rounded-2xl p-3.5 flex items-center justify-between">
-                <div className="flex items-center gap-2.5">
-                  <div className="w-8 h-8 rounded-xl bg-emerald-100 text-emerald-700 flex items-center justify-center font-bold text-xs">
-                    <CheckCircle2 className="w-4 h-4" />
-                  </div>
-                  <div>
-                    <h4 className="text-xs font-bold text-slate-900">
-                      自动导入模版关联预置任务
-                    </h4>
-                    <p className="text-[11px] text-slate-600">
-                      创建时自动为上述里程碑生成初始预置工作流任务集 ({
-                        milestones.reduce((acc, m) => acc + m.defaultTasks.length, 0)
-                      } 个)
-                    </p>
-                  </div>
-                </div>
-                <input
-                  type="checkbox"
-                  checked={generateInitialTasks}
-                  onChange={(e) => setGenerateInitialTasks(e.target.checked)}
-                  className="w-4 h-4 text-emerald-600 rounded focus:ring-emerald-500 cursor-pointer"
-                />
-              </div>
-
-              {/* Milestones List */}
-              <div className="space-y-3">
-                {milestones.length === 0 ? (
-                  <div className="text-center py-8 border-2 border-dashed border-slate-200 rounded-2xl text-slate-400">
-                    <p className="text-xs">暂无阶段里程碑</p>
-                    <button
-                      type="button"
-                      onClick={handleAddMilestone}
-                      className="mt-2 text-xs text-emerald-600 font-bold hover:underline"
-                    >
-                      点击添加第一个里程碑
-                    </button>
-                  </div>
-                ) : (
-                  milestones.map((ms, index) => (
-                    <div
-                      key={ms.id || index}
-                      className="bg-slate-50 border border-slate-200/90 rounded-2xl p-4 space-y-3 relative group"
-                    >
-                      <div className="flex items-center justify-between gap-3">
-                        <div className="flex items-center gap-2 flex-1">
-                          <span className="w-6 h-6 rounded-lg bg-emerald-600 text-white font-bold text-[11px] flex items-center justify-center shrink-0">
-                            M{index + 1}
-                          </span>
-                          <input
-                            type="text"
-                            value={ms.title}
-                            onChange={(e) =>
-                              handleUpdateMilestone(index, 'title', e.target.value)
-                            }
-                            placeholder="里程碑阶段名称"
-                            className="w-full bg-white border border-slate-200 rounded-xl px-3 py-1.5 text-xs font-bold text-slate-900 focus:outline-none focus:border-emerald-500"
-                          />
-                        </div>
-
-                        {/* Due Date Picker */}
-                        <div className="flex items-center gap-1.5 shrink-0 bg-white border border-slate-200 rounded-xl px-3 py-1 text-xs">
-                          <Calendar className="w-3.5 h-3.5 text-slate-400" />
-                          <input
-                            type="date"
-                            value={ms.dueDate}
-                            onChange={(e) =>
-                              handleUpdateMilestone(index, 'dueDate', e.target.value)
-                            }
-                            className="bg-transparent text-slate-700 font-mono text-xs focus:outline-none cursor-pointer"
-                          />
-                        </div>
-
-                        {/* Delete Milestone Button */}
-                        <button
-                          type="button"
-                          onClick={() => handleRemoveMilestone(index)}
-                          className="p-1.5 rounded-lg text-slate-400 hover:text-rose-600 hover:bg-rose-50 transition-colors cursor-pointer shrink-0"
-                          title="删除该里程碑"
-                        >
-                          <Trash2 className="w-4 h-4" />
-                        </button>
-                      </div>
-
-                      {/* Description */}
-                      <input
-                        type="text"
-                        value={ms.description}
-                        onChange={(e) =>
-                          handleUpdateMilestone(index, 'description', e.target.value)
-                        }
-                        placeholder="该阶段关键交付目标描述..."
-                        className="w-full bg-white border border-slate-200 rounded-xl px-3 py-1.5 text-xs text-slate-600 focus:outline-none focus:border-emerald-500"
-                      />
-
-                      {/* Default Tasks Preview under this Milestone */}
-                      {generateInitialTasks && ms.defaultTasks && ms.defaultTasks.length > 0 && (
-                        <div className="pt-2 border-t border-slate-200/80">
-                          <span className="text-[10px] font-bold text-slate-500 uppercase tracking-wider block mb-1.5">
-                            包含初始化任务 ({ms.defaultTasks.length}):
-                          </span>
-                          <div className="flex flex-wrap gap-1.5">
-                            {ms.defaultTasks.map((t, tidx) => (
-                              <span
-                                key={tidx}
-                                className="text-[11px] bg-white border border-slate-200 text-slate-700 px-2.5 py-1 rounded-lg truncate max-w-xs font-medium"
-                              >
-                                {t.title}
-                              </span>
-                            ))}
-                          </div>
-                        </div>
-                      )}
-                    </div>
-                  ))
-                )}
-              </div>
-
-              {/* Step 3 Footer Actions */}
-              <div className="pt-4 flex items-center justify-between border-t border-slate-200">
-                <button
-                  type="button"
-                  onClick={() => setCurrentStep(2)}
-                  className="flex items-center gap-1.5 px-4 py-2 rounded-xl text-xs font-semibold text-slate-600 hover:bg-slate-100 transition-colors cursor-pointer"
-                >
-                  <ArrowLeft className="w-4 h-4" />
-                  <span>上一步：基础配置</span>
                 </button>
 
                 <div className="flex items-center gap-3">
