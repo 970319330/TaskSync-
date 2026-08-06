@@ -208,7 +208,7 @@ export const TaskDetailModal: React.FC<TaskDetailModalProps> = ({
               <div className="flex items-center justify-between">
                 <div className="flex items-center gap-2 text-xs font-bold text-slate-800">
                   <CheckSquare className="w-4 h-4 text-emerald-600" />
-                  <span>子任务拆解清单 ({completedChecklist}/{totalChecklist})</span>
+                  <span>完成标准 / 验收清单 ({completedChecklist}/{totalChecklist})</span>
                 </div>
                 <span className="text-xs font-mono font-bold text-emerald-700">{checklistPercent}%</span>
               </div>
@@ -255,7 +255,7 @@ export const TaskDetailModal: React.FC<TaskDetailModalProps> = ({
                     type="text"
                     value={newChecklistTitle}
                     onChange={(e) => setNewChecklistTitle(e.target.value)}
-                    placeholder="添加新子项..."
+                    placeholder="添加新完成标准 / 验收项..."
                     className="flex-1 bg-white border border-slate-200 rounded-xl px-3 py-1.5 text-xs text-slate-800 placeholder-slate-400 focus:outline-none focus:border-emerald-500 shadow-2xs"
                   />
                   <button

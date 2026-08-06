@@ -13,6 +13,11 @@ import {
   Trash2,
   Layers,
   Lock,
+  GitFork,
+  ChevronRight,
+  ChevronDown,
+  CornerDownRight,
+  ShieldAlert,
 } from 'lucide-react';
 
 interface ListViewProps {
@@ -47,6 +52,18 @@ export const ListView: React.FC<ListViewProps> = ({
   const [sortAsc, setSortAsc] = useState(true);
   const [currentPage, setCurrentPage] = useState(1);
   const [pageSize, setPageSize] = useState(20);
+  const [hierarchyMode, setHierarchyMode] = useState<'tree' | 'flat'>('tree');
+  const [collapsedParentIds, setCollapsedParentIds] = useState<string[]>([]);
+  const [deletingTask, setDeletingTask] = useState<Task | null>(null);
+
+  const toggleCollapseParent = (parentId: string, e: React.MouseEvent) => {
+    e.stopPropagation();
+    if (collapsedParentIds.includes(parentId)) {
+      setCollapsedParentIds(collapsedParentIds.filter((id) => id !== parentId));
+    } else {
+      setCollapsedParentIds([...collapsedParentIds, parentId]);
+    }
+  };
 
   // 列表视图不允许修改状态；优先级仅管理员 / 产品经理可修改
   const canEditPriority = hasPermission(currentMember, 'assign_task', roles);
@@ -80,23 +97,62 @@ export const ListView: React.FC<ListViewProps> = ({
     return sortAsc ? cmp : -cmp;
   });
 
-  // 筛选 / 搜索 / 排序变化时回到第一页，避免停留在越界的空白页
+  // Calculate display tasks (Tree / Hierarchy mode vs Flat mode)
+  const displayTasks = React.useMemo(() => {
+    if (hierarchyMode === 'flat') {
+      return sorted.map((t) => ({
+        task: t,
+        depth: 0,
+        hasChildren: (tasks || []).some((c) => c.parentId === t.id),
+      }));
+    }
+
+    const result: { task: Task; depth: number; hasChildren: boolean }[] = [];
+    const processedIds = new Set<string>();
+
+    // 找到所有顶级任务（没有 parentId，或者 parentId 不在当前排序集合中）
+    const topTasks = sorted.filter((t) => !t.parentId || !sorted.some((p) => p.id === t.parentId));
+
+    topTasks.forEach((topTask) => {
+      const children = sorted.filter((c) => c.parentId === topTask.id);
+      const hasChildren = children.length > 0;
+      result.push({ task: topTask, depth: 0, hasChildren });
+      processedIds.add(topTask.id);
+
+      if (hasChildren && !collapsedParentIds.includes(topTask.id)) {
+        children.forEach((childTask) => {
+          const grandChildren = sorted.filter((g) => g.parentId === childTask.id);
+          result.push({ task: childTask, depth: 1, hasChildren: grandChildren.length > 0 });
+          processedIds.add(childTask.id);
+        });
+      }
+    });
+
+    // 兜底追加未处理到的任务
+    sorted.forEach((t) => {
+      if (!processedIds.has(t.id)) {
+        result.push({ task: t, depth: 0, hasChildren: (tasks || []).some((c) => c.parentId === t.id) });
+      }
+    });
+
+    return result;
+  }, [sorted, tasks, hierarchyMode, collapsedParentIds]);
+
+  // 筛选 / 搜索 / 排序变化时回到第一页
   useEffect(() => {
     setCurrentPage(1);
-  }, [statusFilter, priorityFilter, searchQuery, sortField, sortAsc]);
+  }, [statusFilter, priorityFilter, searchQuery, sortField, sortAsc, hierarchyMode]);
 
-  // 任务总数减少（如删除）导致当前页越界时，回退到最后一页
-  const totalPages = Math.max(1, Math.ceil(sorted.length / pageSize));
+  const totalPages = Math.max(1, Math.ceil(displayTasks.length / pageSize));
   useEffect(() => {
     if (currentPage > totalPages) setCurrentPage(totalPages);
   }, [totalPages, currentPage]);
 
   // 当前页数据
-  const paged = sorted.slice((currentPage - 1) * pageSize, currentPage * pageSize);
+  const pagedDisplay = displayTasks.slice((currentPage - 1) * pageSize, currentPage * pageSize);
 
   const toggleSelectAll = () => {
-    // 全选范围限定为当前页，避免误操作不可见的任务
-    const pagedIds = paged.map((t) => t.id);
+    const pagedIds = pagedDisplay.map((item) => item.task.id);
     const allPagedSelected = pagedIds.length > 0 && pagedIds.every((id) => selectedTaskIds.includes(id));
     if (allPagedSelected) {
       setSelectedTaskIds(selectedTaskIds.filter((id) => !pagedIds.includes(id)));
@@ -105,9 +161,8 @@ export const ListView: React.FC<ListViewProps> = ({
     }
   };
 
-  // 当前页是否已全选（用于表头 checkbox 状态）
   const isPageAllSelected =
-    paged.length > 0 && paged.every((t) => selectedTaskIds.includes(t.id));
+    pagedDisplay.length > 0 && pagedDisplay.every((item) => selectedTaskIds.includes(item.task.id));
 
   const toggleSelectTask = (id: string, e: React.MouseEvent) => {
     e.stopPropagation();
@@ -139,6 +194,35 @@ export const ListView: React.FC<ListViewProps> = ({
           <div className="flex items-center gap-2 text-xs text-slate-600 font-semibold">
             <ListFilter className="w-4 h-4 text-emerald-600" />
             <span>筛选:</span>
+          </div>
+
+          {/* Hierarchy Mode Switch */}
+          <div className="flex items-center gap-1 bg-slate-100 p-1 rounded-xl border border-slate-200">
+            <button
+              type="button"
+              onClick={() => setHierarchyMode('tree')}
+              className={`px-2.5 py-1 rounded-lg text-xs font-bold transition-all flex items-center gap-1.5 cursor-pointer ${
+                hierarchyMode === 'tree'
+                  ? 'bg-white text-emerald-800 shadow-2xs border border-slate-200/60'
+                  : 'text-slate-600 hover:text-slate-900'
+              }`}
+            >
+              <GitFork className="w-3.5 h-3.5 text-emerald-600" />
+              <span>层级树视图</span>
+            </button>
+
+            <button
+              type="button"
+              onClick={() => setHierarchyMode('flat')}
+              className={`px-2.5 py-1 rounded-lg text-xs font-bold transition-all flex items-center gap-1.5 cursor-pointer ${
+                hierarchyMode === 'flat'
+                  ? 'bg-white text-emerald-800 shadow-2xs border border-slate-200/60'
+                  : 'text-slate-600 hover:text-slate-900'
+              }`}
+            >
+              <Layers className="w-3.5 h-3.5 text-slate-500" />
+              <span>平铺列表</span>
+            </button>
           </div>
 
           {/* Status Filter */}
@@ -208,7 +292,7 @@ export const ListView: React.FC<ListViewProps> = ({
                     <ArrowUpDown className="w-3 h-3 text-slate-400" />
                   </div>
                 </th>
-                <th className="p-3">任务标题 & 标签</th>
+                <th className="p-3">任务标题 & 关联依赖</th>
                 <th className="p-3 w-32">当前状态</th>
                 <th className="p-3 w-28 cursor-pointer hover:text-slate-800" onClick={() => { setSortField('priority'); setSortAsc(!sortAsc); }}>
                   <div className="flex items-center gap-1">
@@ -228,10 +312,16 @@ export const ListView: React.FC<ListViewProps> = ({
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-100 text-xs text-slate-700">
-              {paged.map((task) => {
+              {pagedDisplay.map(({ task, depth, hasChildren }) => {
                 const isSelected = selectedTaskIds.includes(task.id);
                 const st = statusMap[task.status];
                 const taskColor = getTaskColor(task.color);
+
+                const childCount = (tasks || []).filter((c) => c.parentId === task.id).length;
+                const blockers = (task.blockedByTaskIds || [])
+                  .map((id) => tasks.find((t) => t.id === id))
+                  .filter(Boolean) as Task[];
+                const incompleteBlockers = blockers.filter((b) => b.status !== 'done');
 
                 return (
                   <tr
@@ -258,15 +348,57 @@ export const ListView: React.FC<ListViewProps> = ({
                       {task.id}
                     </td>
                     <td className="p-3 max-w-md">
-                      <div className="font-semibold text-slate-900 hover:text-emerald-700 transition-colors mb-0.5">
-                        {task.title}
+                      <div className={`flex items-center gap-1.5 font-semibold text-slate-900 hover:text-emerald-700 transition-colors mb-0.5 ${depth > 0 ? 'ml-5' : ''}`}>
+                        {depth > 0 && <CornerDownRight className="w-3.5 h-3.5 text-slate-400 shrink-0" />}
+
+                        {hasChildren && hierarchyMode === 'tree' && (
+                          <button
+                            type="button"
+                            onClick={(e) => toggleCollapseParent(task.id, e)}
+                            className="p-0.5 hover:bg-slate-200 rounded text-slate-500 transition-colors cursor-pointer shrink-0"
+                            title={collapsedParentIds.includes(task.id) ? '展开子任务' : '折叠子任务'}
+                          >
+                            {collapsedParentIds.includes(task.id) ? (
+                              <ChevronRight className="w-3.5 h-3.5 text-slate-600" />
+                            ) : (
+                              <ChevronDown className="w-3.5 h-3.5 text-slate-600" />
+                            )}
+                          </button>
+                        )}
+
+                        <span>{task.title}</span>
                       </div>
+
                       {task.description && (
-                        <p className="text-[11px] text-slate-500 line-clamp-1 leading-relaxed mb-1 font-sans">
+                        <p className={`text-[11px] text-slate-500 line-clamp-1 leading-relaxed mb-1 font-sans ${depth > 0 ? 'ml-5' : ''}`}>
                           {task.description.replace(/[#*`_~>[\]]/g, '')}
                         </p>
                       )}
-                      <div className="flex flex-wrap gap-1">
+
+                      <div className={`flex flex-wrap items-center gap-1 ${depth > 0 ? 'ml-5' : ''}`}>
+                        {task.parentId && (
+                          <span className="text-[10px] bg-indigo-50 text-indigo-700 border border-indigo-200 px-1.5 py-0.2 rounded font-mono">
+                            父级: [{task.parentId}]
+                          </span>
+                        )}
+
+                        {childCount > 0 && (
+                          <span className="text-[10px] bg-indigo-50 text-indigo-800 border border-indigo-200 px-1.5 py-0.2 rounded font-semibold flex items-center gap-0.5">
+                            🌿 {childCount}个子任务
+                          </span>
+                        )}
+
+                        {incompleteBlockers.length > 0 ? (
+                          <span className="text-[10px] bg-rose-50 text-rose-800 border border-rose-300 px-1.5 py-0.2 rounded font-semibold flex items-center gap-1">
+                            <ShieldAlert className="w-3 h-3 text-rose-600 shrink-0" />
+                            被 [{incompleteBlockers.map((b) => b.id).join(', ')}] 阻塞
+                          </span>
+                        ) : (task.blockedByTaskIds || []).length > 0 && (
+                          <span className="text-[10px] bg-emerald-50 text-emerald-800 border border-emerald-300 px-1.5 py-0.2 rounded font-medium">
+                            ✅ 依赖已解锁
+                          </span>
+                        )}
+
                         {(task.tags || []).map((tag, idx) => (
                           <span
                             key={idx}
@@ -332,7 +464,7 @@ export const ListView: React.FC<ListViewProps> = ({
                     </td>
                     <td className="p-3 text-center" onClick={(e) => e.stopPropagation()}>
                       <button
-                        onClick={() => onDeleteTask(task.id)}
+                        onClick={() => setDeletingTask(task)}
                         className="p-1.5 text-slate-400 hover:text-rose-600 hover:bg-rose-50 rounded transition-colors cursor-pointer"
                         title="删除任务"
                       >
@@ -343,7 +475,7 @@ export const ListView: React.FC<ListViewProps> = ({
                 );
               })}
 
-              {paged.length === 0 && (
+              {pagedDisplay.length === 0 && (
                 <tr>
                   <td colSpan={10} className="p-12 text-center text-slate-400 text-sm">
                     没有找到匹配的任务
@@ -356,13 +488,49 @@ export const ListView: React.FC<ListViewProps> = ({
 
         {/* 分页控件 */}
         <Pagination
-          totalItems={sorted.length}
+          totalItems={displayTasks.length}
           currentPage={currentPage}
           pageSize={pageSize}
           onPageChange={setCurrentPage}
           onPageSizeChange={setPageSize}
         />
       </div>
+
+      {/* Delete Confirmation Modal */}
+      {deletingTask && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm animate-fadeIn" onClick={() => setDeletingTask(null)}>
+          <div className="bg-white rounded-3xl shadow-2xl p-6 max-w-sm w-full mx-4 space-y-4" onClick={(e) => e.stopPropagation()}>
+            <div className="flex items-center gap-3">
+              <div className="w-10 h-10 rounded-full bg-rose-100 flex items-center justify-center shrink-0">
+                <Trash2 className="w-5 h-5 text-rose-600" />
+              </div>
+              <div>
+                <h3 className="text-sm font-bold text-slate-900">确认彻底删除任务</h3>
+                <p className="text-xs text-slate-500 mt-0.5">
+                  确定要删除任务 <span className="font-mono font-bold text-slate-800">[{deletingTask.id}] {deletingTask.title}</span> 吗？关联的子任务也将清理，此操作不可撤销。
+                </p>
+              </div>
+            </div>
+            <div className="flex gap-2 pt-2">
+              <button
+                onClick={() => setDeletingTask(null)}
+                className="flex-1 bg-slate-100 hover:bg-slate-200 text-slate-700 px-4 py-2.5 rounded-xl text-xs font-semibold transition-colors cursor-pointer"
+              >
+                取消
+              </button>
+              <button
+                onClick={() => {
+                  onDeleteTask(deletingTask.id);
+                  setDeletingTask(null);
+                }}
+                className="flex-1 bg-rose-600 hover:bg-rose-500 text-white px-4 py-2.5 rounded-xl text-xs font-bold transition-colors cursor-pointer shadow-xs"
+              >
+                彻底删除
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 };

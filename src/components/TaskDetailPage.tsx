@@ -1,5 +1,5 @@
-import React, { useState, useEffect } from 'react';
-import { Task, TaskStatus, TaskPriority, Member, ChecklistItem, Role, TaskColorKey, TASK_COLORS, getTaskColor, TaskFeedback } from '../types';
+import React, { useState, useEffect, useMemo } from 'react';
+import { Task, TaskStatus, TaskPriority, Member, ChecklistItem, Role, TaskColorKey, TASK_COLORS, getTaskColor, TaskFeedback, TaskComment, TaskActivity } from '../types';
 import { hasPermission } from '../permissions';
 import { RichTextEditor } from './RichTextEditor';
 import { startDevInTrae, getProjectPath } from '../utils/trae';
@@ -24,6 +24,9 @@ import {
   ExternalLink,
   Loader2,
   ChevronRight,
+  ChevronDown,
+  ChevronUp,
+  Eye,
   FolderKanban,
   FileText,
   Play,
@@ -36,15 +39,22 @@ import {
   FileCode2,
   Package,
   ClipboardCheck,
+  GitFork,
+  Link2,
+  ShieldAlert,
+  Layers,
 } from 'lucide-react';
 
 interface TaskDetailPageProps {
   task: Task;
+  allTasks?: Task[];
   members: Member[];
   roles: Role[];
   currentMember: Member;
   projectName?: string;
   onBack: () => void;
+  onSelectTask?: (taskId: string) => void;
+  onOpenCreateSubtask?: (parentTaskId: string) => void;
   onUpdateTask: (updated: Partial<Task>) => void;
   onAddComment: (taskId: string, content: string) => void;
   onDeleteTask?: (taskId: string) => void;
@@ -52,11 +62,14 @@ interface TaskDetailPageProps {
 
 export const TaskDetailPage: React.FC<TaskDetailPageProps> = ({
   task,
+  allTasks = [],
   members,
   roles,
   currentMember,
   projectName = '项目',
   onBack,
+  onSelectTask,
+  onOpenCreateSubtask,
   onUpdateTask,
   onAddComment,
   onDeleteTask,
@@ -74,12 +87,15 @@ export const TaskDetailPage: React.FC<TaskDetailPageProps> = ({
   const [newTagInput, setNewTagInput] = useState('');
   const [isEditing, setIsEditing] = useState(false);
   const [showCompleteModal, setShowCompleteModal] = useState(false);
+  const [showDeleteModal, setShowDeleteModal] = useState(false);
+  const [includeChildTaskFeedbacks, setIncludeChildTaskFeedbacks] = useState(true);
+  const [expandedChildTaskId, setExpandedChildTaskId] = useState<string | null>(null);
 
   // 弹窗显示时禁止背景滚动
   useEffect(() => {
-    document.body.style.overflow = showCompleteModal ? 'hidden' : '';
+    document.body.style.overflow = (showCompleteModal || showDeleteModal) ? 'hidden' : '';
     return () => { document.body.style.overflow = ''; };
-  }, [showCompleteModal]);
+  }, [showCompleteModal, showDeleteModal]);
 
   const checklist = task.checklist || [];
   const comments = task.comments || [];
@@ -87,6 +103,61 @@ export const TaskDetailPage: React.FC<TaskDetailPageProps> = ({
   const feedbacks = task.feedbacks || [];
   const assigneeIds = task.assigneeIds || [];
   const tags = task.tags || [];
+
+  // 父子任务与依赖关系数据计算
+  const parentTask = allTasks.find((t) => t.id === task.parentId);
+  const childTasks = allTasks.filter((t) => t.parentId === task.id);
+  const predecessorTasks = (task.blockedByTaskIds || [])
+    .map((id) => allTasks.find((t) => t.id === id))
+    .filter(Boolean) as Task[];
+  const incompletePredecessors = predecessorTasks.filter((t) => t.status !== 'done');
+  const blockingTasks = allTasks.filter((t) => t.blockedByTaskIds?.includes(task.id));
+
+  // 聚合当前主任务及所有关联子任务的开发反馈、讨论评论与动态履历
+  const allRelatedFeedbacks = useMemo(() => {
+    const list: Array<TaskFeedback & { sourceTaskId: string; sourceTaskTitle: string; isChild: boolean }> = [];
+    (task.feedbacks || []).forEach((fb) => {
+      list.push({ ...fb, sourceTaskId: task.id, sourceTaskTitle: task.title, isChild: false });
+    });
+    if (includeChildTaskFeedbacks) {
+      childTasks.forEach((ct) => {
+        (ct.feedbacks || []).forEach((fb) => {
+          list.push({ ...fb, sourceTaskId: ct.id, sourceTaskTitle: ct.title, isChild: true });
+        });
+      });
+    }
+    return list.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+  }, [task, childTasks, includeChildTaskFeedbacks]);
+
+  const allRelatedComments = useMemo(() => {
+    const list: Array<TaskComment & { sourceTaskId: string; sourceTaskTitle: string; isChild: boolean }> = [];
+    (task.comments || []).forEach((c) => {
+      list.push({ ...c, sourceTaskId: task.id, sourceTaskTitle: task.title, isChild: false });
+    });
+    if (includeChildTaskFeedbacks) {
+      childTasks.forEach((ct) => {
+        (ct.comments || []).forEach((c) => {
+          list.push({ ...c, sourceTaskId: ct.id, sourceTaskTitle: ct.title, isChild: true });
+        });
+      });
+    }
+    return list.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+  }, [task, childTasks, includeChildTaskFeedbacks]);
+
+  const allRelatedActivities = useMemo(() => {
+    const list: Array<TaskActivity & { sourceTaskId: string; sourceTaskTitle: string; isChild: boolean }> = [];
+    (task.activities || (task as any).history || []).forEach((act: any) => {
+      list.push({ ...act, sourceTaskId: task.id, sourceTaskTitle: task.title, isChild: false });
+    });
+    if (includeChildTaskFeedbacks) {
+      childTasks.forEach((ct) => {
+        (ct.activities || (ct as any).history || []).forEach((act: any) => {
+          list.push({ ...act, sourceTaskId: ct.id, sourceTaskTitle: ct.title, isChild: true });
+        });
+      });
+    }
+    return list.sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime());
+  }, [task, childTasks, includeChildTaskFeedbacks]);
 
   const completedChecklist = checklist.filter((c) => c.completed).length;
   const totalChecklist = checklist.length;
@@ -417,14 +488,9 @@ export const TaskDetailPage: React.FC<TaskDetailPageProps> = ({
 
             {onDeleteTask && (
               <button
-                onClick={() => {
-                  if (window.confirm('确定要彻底删除此任务吗？')) {
-                    onDeleteTask(task.id);
-                    onBack();
-                  }
-                }}
-                className="p-1.5 rounded-xl text-rose-500 hover:text-rose-700 hover:bg-rose-50 transition-colors cursor-pointer"
-                title="删除任务"
+                onClick={() => setShowDeleteModal(true)}
+                className="p-1.5 rounded-xl text-rose-500 hover:text-rose-700 hover:bg-rose-50 border border-transparent hover:border-rose-200 transition-colors cursor-pointer"
+                title="彻底删除任务"
               >
                 <Trash2 className="w-4 h-4" />
               </button>
@@ -440,6 +506,30 @@ export const TaskDetailPage: React.FC<TaskDetailPageProps> = ({
           <div className="max-w-7xl mx-auto flex items-center gap-2 text-xs text-amber-800 font-medium">
             <Lock className="w-3.5 h-3.5 shrink-0" />
             <span>只读模式：你不是此任务的经办人，仅可查看不可编辑。如需修改请联系经办人或管理员。</span>
+          </div>
+        </div>
+      )}
+
+      {/* 前置依赖未解锁警报横幅 */}
+      {incompletePredecessors.length > 0 && (
+        <div className="bg-rose-50 border-b border-rose-200 px-4 sm:px-6 py-2.5 animate-fadeIn">
+          <div className="max-w-7xl mx-auto flex items-center justify-between gap-3 text-xs text-rose-900 font-semibold">
+            <div className="flex items-center gap-2">
+              <ShieldAlert className="w-4 h-4 text-rose-600 shrink-0" />
+              <span>
+                🚫 前置阻塞警报：存在 {incompletePredecessors.length} 个未完成的前置依赖任务 (
+                {incompletePredecessors.map((p) => p.id).join(', ')}
+                )，强烈建议在此依赖解锁后再推进该任务。
+              </span>
+            </div>
+            {onSelectTask && (
+              <button
+                onClick={() => onSelectTask(incompletePredecessors[0].id)}
+                className="text-[11px] bg-white border border-rose-200 hover:bg-rose-100 text-rose-800 px-2.5 py-1 rounded-lg transition-colors cursor-pointer shrink-0 font-bold"
+              >
+                查看首个阻塞任务 {incompletePredecessors[0].id} →
+              </button>
+            )}
           </div>
         </div>
       )}
@@ -545,196 +635,339 @@ export const TaskDetailPage: React.FC<TaskDetailPageProps> = ({
             </div>
 
             {/* Checklist & Subtasks Section */}
-            <div className="bg-white border border-slate-200 rounded-3xl p-6 sm:p-8 shadow-2xs space-y-5">
-              <div className="flex items-center justify-between border-b border-slate-100 pb-3">
+            <div className="bg-white border border-slate-200 rounded-3xl p-6 sm:p-8 shadow-2xs space-y-6">
+              {/* Header & Overall Progress */}
+              <div className="flex flex-wrap items-center justify-between gap-3 border-b border-slate-100 pb-3">
                 <div className="flex items-center gap-2">
                   <CheckSquare className="w-5 h-5 text-emerald-600" />
                   <h3 className="text-sm font-bold text-slate-900">
-                    子任务拆解清单 ({completedChecklist}/{totalChecklist})
+                    任务拆解与验收标准
                   </h3>
+                  <span className="text-xs text-slate-500 font-medium">
+                    (实体子任务: {childTasks.filter((c) => c.status === 'done').length}/{childTasks.length} | 验收项: {completedChecklist}/{totalChecklist})
+                  </span>
                 </div>
-                <span className="text-sm font-mono font-bold text-emerald-700 bg-emerald-50 border border-emerald-200 px-3 py-1 rounded-xl">
-                  {checklistPercent}% 完成度
-                </span>
+                {(() => {
+                  const totalItems = childTasks.length + totalChecklist;
+                  const completedItems = childTasks.filter((c) => c.status === 'done').length + completedChecklist;
+                  const combinedPercent = totalItems > 0 ? Math.round((completedItems / totalItems) * 100) : 0;
+                  return (
+                    <span className="text-sm font-mono font-bold text-emerald-700 bg-emerald-50 border border-emerald-200 px-3 py-1 rounded-xl">
+                      {combinedPercent}% 整体完成度
+                    </span>
+                  );
+                })()}
               </div>
 
               {/* Progress Bar */}
-              <div className="w-full bg-slate-100 h-2.5 rounded-full overflow-hidden">
-                <div
-                  className="bg-emerald-500 h-full transition-all duration-300 rounded-full"
-                  style={{ width: `${checklistPercent}%` }}
-                />
-              </div>
-
-              {/* Checklist Items */}
-              <div className="space-y-2">
-                {checklist.map((item) => {
-                  const isEditingThis = editingChecklistId === item.id;
-                  const canToggle = canToggleChecklist(item);
-                  return (
+              {(() => {
+                const totalItems = childTasks.length + totalChecklist;
+                const completedItems = childTasks.filter((c) => c.status === 'done').length + completedChecklist;
+                const combinedPercent = totalItems > 0 ? Math.round((completedItems / totalItems) * 100) : 0;
+                return (
+                  <div className="w-full bg-slate-100 h-2.5 rounded-full overflow-hidden">
                     <div
-                      key={item.id}
-                      className={`flex items-start gap-2 p-3 rounded-2xl border transition-all ${
-                        item.completed
-                          ? 'bg-emerald-50/40 border-emerald-200/60 text-slate-400'
-                          : 'bg-slate-50/60 border-slate-200 text-slate-800'
-                      }`}
+                      className="bg-emerald-500 h-full transition-all duration-300 rounded-full"
+                      style={{ width: `${combinedPercent}%` }}
+                    />
+                  </div>
+                );
+              })()}
+
+              {/* Section 1: 关联的实体子任务 (Full System Subtasks) */}
+              <div className="space-y-3">
+                <div className="flex items-center justify-between">
+                  <span className="text-xs font-bold text-slate-800 uppercase tracking-wider flex items-center gap-1.5">
+                    <GitFork className="w-4 h-4 text-indigo-600" />
+                    <span>关联实体子任务 ({childTasks.length})</span>
+                  </span>
+                  {onOpenCreateSubtask && (
+                    <button
+                      type="button"
+                      onClick={() => onOpenCreateSubtask(task.id)}
+                      className="text-xs bg-indigo-50 hover:bg-indigo-100 text-indigo-700 border border-indigo-200 font-bold px-3 py-1 rounded-xl transition-all cursor-pointer flex items-center gap-1 shadow-2xs"
                     >
-                      <label className={`flex items-center gap-3 flex-1 min-w-0 pt-0.5 ${canToggle ? 'cursor-pointer' : 'cursor-not-allowed'}`}>
-                        <input
-                          type="checkbox"
-                          checked={item.completed}
-                          onChange={() => handleToggleChecklist(item.id)}
-                          disabled={!canToggle}
-                          className={`w-4 h-4 rounded text-emerald-600 focus:ring-emerald-500 shrink-0 ${canToggle ? 'cursor-pointer' : 'cursor-not-allowed opacity-50'}`}
-                        />
-                        {isEditingThis ? (
-                          <input
-                            type="text"
-                            value={editingChecklistTitle}
-                            onChange={(e) => setEditingChecklistTitle(e.target.value)}
-                            onBlur={handleSaveChecklistTitle}
-                            onKeyDown={(e) => {
-                              if (e.key === 'Enter') handleSaveChecklistTitle();
-                              if (e.key === 'Escape') { setEditingChecklistId(null); setEditingChecklistTitle(''); }
-                            }}
-                            autoFocus
-                            className={`flex-1 bg-white border border-emerald-300 rounded-lg px-2 py-1 text-xs font-medium focus:outline-none focus:border-emerald-500 shadow-xs ${
-                              item.completed ? 'line-through text-slate-400' : 'text-slate-800'
+                      <span>+ 拆解新建实体子任务</span>
+                    </button>
+                  )}
+                </div>
+
+                {childTasks.length > 0 ? (
+                  <div className="grid grid-cols-1 gap-2">
+                    {childTasks.map((ct) => {
+                      const ctAssignees = members.filter((m) => (ct.assigneeIds || []).includes(m.id));
+                      const isDone = ct.status === 'done';
+                      const ctFeedbacksCount = ct.feedbacks?.length || 0;
+                      const ctCommentsCount = ct.comments?.length || 0;
+                      const isExpanded = expandedChildTaskId === ct.id;
+
+                      return (
+                        <div key={ct.id} className="space-y-2">
+                          <div
+                            onClick={() => onSelectTask && onSelectTask(ct.id)}
+                            className={`flex flex-wrap items-center justify-between gap-3 p-3 rounded-2xl border transition-all cursor-pointer group shadow-2xs ${
+                              isDone
+                                ? 'bg-slate-50/80 border-slate-200 opacity-75'
+                                : 'bg-white border-slate-200 hover:border-indigo-300'
                             }`}
-                          />
-                        ) : (
-                          <span
-                            className={`text-xs font-medium leading-relaxed flex-1 ${item.completed ? 'line-through' : ''}`}
-                            onDoubleClick={() => handleStartEditChecklist(item)}
                           >
-                            {item.title}
-                          </span>
-                        )}
-                      </label>
+                            <div className="flex items-center gap-2.5 min-w-0 flex-1">
+                              <span className="font-mono text-xs font-bold text-indigo-700 bg-indigo-50 border border-indigo-100 px-2 py-0.5 rounded-lg shrink-0">
+                                {ct.id}
+                              </span>
+                              <span className={`text-xs font-bold truncate ${isDone ? 'line-through text-slate-400' : 'text-slate-900 group-hover:text-indigo-600'}`}>
+                                {ct.title}
+                              </span>
+                              <span className={`text-[10px] font-bold px-2 py-0.5 rounded-lg border shrink-0 ${statusBadgeMap[ct.status]?.cls || 'bg-slate-100 text-slate-700 border-slate-200'}`}>
+                                {statusBadgeMap[ct.status]?.label || ct.status}
+                              </span>
 
-                      {/* Assignee */}
-                      <div className="flex items-center shrink-0 pt-0.5">
-                        <select
-                          value={item.assigneeId || ''}
-                          onChange={(e) => handleUpdateChecklistAssignee(item.id, e.target.value)}
-                          disabled={!canAssignTask}
-                          className={`text-[10px] border rounded-lg px-1.5 py-1 bg-white focus:outline-none focus:border-emerald-400 ${
-                            canAssignTask ? 'cursor-pointer' : 'cursor-not-allowed opacity-60'
-                          } ${
-                            item.assigneeId ? 'text-emerald-800 border-emerald-200 font-semibold' : 'text-slate-400 border-slate-200'
-                          }`}
-                        >
-                          <option value="">未指派</option>
-                          {members.map((m) => (
-                            <option key={m.id} value={m.id}>{m.name}</option>
-                          ))}
-                        </select>
-                      </div>
+                              {/* 开发反馈 & 讨论 统计标记 */}
+                              {ctFeedbacksCount > 0 && (
+                                <span className="inline-flex items-center gap-1 text-[10px] font-bold text-indigo-700 bg-indigo-50 border border-indigo-200 px-2 py-0.5 rounded-lg shrink-0">
+                                  <ClipboardCheck className="w-3 h-3 text-indigo-600" />
+                                  <span>{ctFeedbacksCount} 条反馈</span>
+                                </span>
+                              )}
+                              {ctCommentsCount > 0 && (
+                                <span className="inline-flex items-center gap-1 text-[10px] font-bold text-slate-600 bg-slate-100 border border-slate-200 px-2 py-0.5 rounded-lg shrink-0">
+                                  <MessageSquare className="w-3 h-3 text-slate-500" />
+                                  <span>{ctCommentsCount} 讨论</span>
+                                </span>
+                              )}
+                            </div>
 
-                      {/* Actions */}
-                      <div className="flex items-center gap-0.5 shrink-0 pt-0.5">
-                        {!isEditingThis && (
-                          <button
-                            type="button"
-                            onClick={() => handleStartEditChecklist(item)}
-                            className="p-1 text-slate-400 hover:text-emerald-600 transition-colors cursor-pointer"
-                            title="编辑标题"
-                          >
-                            <Edit3 className="w-3.5 h-3.5" />
-                          </button>
-                        )}
-                        <button
-                          type="button"
-                          onClick={() => handleDeleteChecklistItem(item.id)}
-                          className="p-1 text-slate-400 hover:text-rose-600 transition-colors cursor-pointer"
-                          title="删除"
-                        >
-                          <Trash2 className="w-3.5 h-3.5" />
-                        </button>
-                      </div>
-                    </div>
-                  );
-                })}
+                            <div className="flex items-center gap-2 shrink-0">
+                              {/* Assignee Avatars */}
+                              <div className="flex -space-x-1.5 overflow-hidden">
+                                {ctAssignees.map((m) => (
+                                  <img
+                                    key={m.id}
+                                    src={m.avatar}
+                                    alt={m.name}
+                                    title={m.name}
+                                    className="inline-block h-5 w-5 rounded-full ring-2 ring-white object-cover"
+                                  />
+                                ))}
+                              </div>
 
-                {checklist.length === 0 && (
-                  <p className="text-xs text-slate-400 italic text-center py-3">暂无子任务拆解项</p>
+                              {/* Quick inline feedback preview toggle */}
+                              {ctFeedbacksCount > 0 && (
+                                <button
+                                  type="button"
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    setExpandedChildTaskId(isExpanded ? null : ct.id);
+                                  }}
+                                  className="text-[10px] text-indigo-700 hover:text-indigo-900 bg-indigo-50 hover:bg-indigo-100 border border-indigo-200 px-2 py-1 rounded-lg font-bold flex items-center gap-1 transition-all cursor-pointer"
+                                  title="在当前页面预览子任务的最新开发反馈"
+                                >
+                                  <Eye className="w-3 h-3" />
+                                  <span>{isExpanded ? '收起反馈' : '预览反馈'}</span>
+                                </button>
+                              )}
+
+                              <ChevronRight className="w-4 h-4 text-slate-400 group-hover:text-indigo-600 shrink-0" />
+                            </div>
+                          </div>
+
+                          {/* Expanded inline preview drawer for subtask */}
+                          {isExpanded && ct.feedbacks && ct.feedbacks.length > 0 && (
+                            <div className="bg-indigo-50/60 border border-indigo-200/80 rounded-2xl p-3.5 space-y-2 ml-4 shadow-2xs">
+                              <div className="flex items-center justify-between">
+                                <span className="text-xs font-bold text-indigo-900 flex items-center gap-1.5">
+                                  <ClipboardCheck className="w-3.5 h-3.5 text-indigo-600" />
+                                  <span>子任务 [{ct.id}] 最新开发反馈:</span>
+                                </span>
+                                <button
+                                  onClick={() => onSelectTask && onSelectTask(ct.id)}
+                                  className="text-[10px] text-indigo-700 hover:underline font-bold flex items-center gap-0.5"
+                                >
+                                  <span>完整查看子任务</span>
+                                  <ChevronRight className="w-3 h-3" />
+                                </button>
+                              </div>
+                              <div className="text-xs text-slate-700 bg-white/80 rounded-xl p-2.5 border border-indigo-100">
+                                <Markdown>{ct.feedbacks[0].summary}</Markdown>
+                              </div>
+                              {ct.feedbacks[0].changedFiles && ct.feedbacks[0].changedFiles.length > 0 && (
+                                <div className="text-[10px] text-slate-500 flex items-center gap-1.5">
+                                  <FileCode2 className="w-3 h-3 text-slate-400" />
+                                  <span>修改文件 ({ct.feedbacks[0].changedFiles.length}):</span>
+                                  <span className="font-mono text-slate-700 truncate">{ct.feedbacks[0].changedFiles.join(', ')}</span>
+                                </div>
+                              )}
+                            </div>
+                          )}
+                        </div>
+                      );
+                    })}
+                  </div>
+                ) : (
+                  <div className="text-xs text-slate-400 italic bg-slate-50/50 border border-slate-200/60 rounded-2xl p-3 text-center">
+                    暂无关联的实体子任务，可点击右上角「+ 拆解新建实体子任务」发起独立子任务。
+                  </div>
                 )}
               </div>
 
-              {/* Add New Subtask Form */}
-              <form onSubmit={handleAddChecklistItem} className="flex gap-2 pt-2">
-                <input
-                  type="text"
-                  placeholder="新增子任务..."
-                  value={newChecklistTitle}
-                  onChange={(e) => setNewChecklistTitle(e.target.value)}
-                  className="flex-1 bg-slate-50 border border-slate-200 rounded-xl px-3.5 py-2 text-xs text-slate-800 placeholder-slate-400 focus:outline-none focus:border-emerald-500 shadow-2xs"
-                />
-                <select
-                  value={newSubtaskAssignee}
-                  onChange={(e) => setNewSubtaskAssignee(e.target.value)}
-                  disabled={!canAssignTask}
-                  className={`bg-slate-50 border border-slate-200 rounded-xl px-2.5 py-2 text-xs text-slate-700 focus:outline-none focus:border-emerald-500 shrink-0 ${
-                    canAssignTask ? 'cursor-pointer' : 'cursor-not-allowed opacity-60'
-                  }`}
-                >
-                  <option value="">指派人员</option>
-                  {members.map((m) => (
-                    <option key={m.id} value={m.id}>{m.name}</option>
-                  ))}
-                </select>
-                <button
-                  type="submit"
-                  disabled={!canEditTask || !newChecklistTitle.trim()}
-                  className="bg-emerald-600 hover:bg-emerald-500 text-white px-4 py-2 rounded-xl text-xs font-semibold flex items-center gap-1 shadow-xs disabled:opacity-40 transition-all cursor-pointer shrink-0"
-                >
-                  <Plus className="w-4 h-4" />
-                  <span>添加</span>
-                </button>
-              </form>
+              {/* Section 2: 完成标准 / 验收清单 */}
+              <div className="space-y-3 pt-2 border-t border-slate-100">
+                <span className="text-xs font-bold text-slate-800 uppercase tracking-wider flex items-center gap-1.5">
+                  <CheckSquare className="w-4 h-4 text-emerald-600" />
+                  <span>完成标准 / 验收清单 ({completedChecklist}/{totalChecklist})</span>
+                </span>
+
+                <div className="space-y-2">
+                  {checklist.map((item) => {
+                    const isEditingThis = editingChecklistId === item.id;
+                    const canToggle = canToggleChecklist(item);
+                    return (
+                      <div
+                        key={item.id}
+                        className={`flex items-start gap-2 p-3 rounded-2xl border transition-all ${
+                          item.completed
+                            ? 'bg-emerald-50/40 border-emerald-200/60 text-slate-400'
+                            : 'bg-slate-50/60 border-slate-200 text-slate-800'
+                        }`}
+                      >
+                        <label className={`flex items-center gap-3 flex-1 min-w-0 pt-0.5 ${canToggle ? 'cursor-pointer' : 'cursor-not-allowed'}`}>
+                          <input
+                            type="checkbox"
+                            checked={item.completed}
+                            onChange={() => handleToggleChecklist(item.id)}
+                            disabled={!canToggle}
+                            className={`w-4 h-4 rounded text-emerald-600 focus:ring-emerald-500 shrink-0 ${canToggle ? 'cursor-pointer' : 'cursor-not-allowed opacity-50'}`}
+                          />
+                          {isEditingThis ? (
+                            <input
+                              type="text"
+                              value={editingChecklistTitle}
+                              onChange={(e) => setEditingChecklistTitle(e.target.value)}
+                              onBlur={handleSaveChecklistTitle}
+                              onKeyDown={(e) => {
+                                if (e.key === 'Enter') handleSaveChecklistTitle();
+                                if (e.key === 'Escape') { setEditingChecklistId(null); setEditingChecklistTitle(''); }
+                              }}
+                              autoFocus
+                              className={`flex-1 bg-white border border-emerald-300 rounded-lg px-2 py-1 text-xs font-medium focus:outline-none focus:border-emerald-500 shadow-xs ${
+                                item.completed ? 'line-through text-slate-400' : 'text-slate-800'
+                              }`}
+                            />
+                          ) : (
+                            <span
+                              className={`text-xs font-medium leading-relaxed flex-1 ${item.completed ? 'line-through' : ''}`}
+                              onDoubleClick={() => handleStartEditChecklist(item)}
+                            >
+                              {item.title}
+                            </span>
+                          )}
+                        </label>
+
+                        {/* Actions */}
+                        <div className="flex items-center gap-0.5 shrink-0 pt-0.5">
+                          {!isEditingThis && (
+                            <button
+                              type="button"
+                              onClick={() => handleStartEditChecklist(item)}
+                              className="p-1 text-slate-400 hover:text-emerald-600 transition-colors cursor-pointer"
+                              title="编辑标题"
+                            >
+                              <Edit3 className="w-3.5 h-3.5" />
+                            </button>
+                          )}
+                          <button
+                            type="button"
+                            onClick={() => handleDeleteChecklistItem(item.id)}
+                            className="p-1 text-slate-400 hover:text-rose-600 transition-colors cursor-pointer"
+                            title="删除"
+                          >
+                            <Trash2 className="w-3.5 h-3.5" />
+                          </button>
+                        </div>
+                      </div>
+                    );
+                  })}
+
+                  {checklist.length === 0 && (
+                    <p className="text-xs text-slate-400 italic text-center py-2">暂无完成标准 / 验收项</p>
+                  )}
+                </div>
+
+                {/* Add New Checklist Item Form */}
+                <form onSubmit={handleAddChecklistItem} className="flex gap-2 pt-2">
+                  <input
+                    type="text"
+                    placeholder="新增完成标准 / 验收项..."
+                    value={newChecklistTitle}
+                    onChange={(e) => setNewChecklistTitle(e.target.value)}
+                    className="flex-1 bg-slate-50 border border-slate-200 rounded-xl px-3.5 py-2 text-xs text-slate-800 placeholder-slate-400 focus:outline-none focus:border-emerald-500 shadow-2xs"
+                  />
+                  <button
+                    type="submit"
+                    disabled={!canEditTask || !newChecklistTitle.trim()}
+                    className="bg-emerald-600 hover:bg-emerald-500 text-white px-4 py-2 rounded-xl text-xs font-semibold flex items-center gap-1 shadow-xs disabled:opacity-40 transition-all cursor-pointer shrink-0"
+                  >
+                    <Plus className="w-4 h-4" />
+                    <span>添加</span>
+                  </button>
+                </form>
+              </div>
             </div>
 
             {/* Discussions & Audit Trail */}
             <div className="bg-white border border-slate-200 rounded-3xl p-6 sm:p-8 shadow-2xs space-y-6">
               
-              {/* Tabs header */}
-              <div className="flex items-center gap-4 border-b border-slate-200 pb-3">
-                <button
-                  onClick={() => setActiveTab('comments')}
-                  className={`flex items-center gap-2 text-xs font-bold pb-2 border-b-2 transition-all cursor-pointer ${
-                    activeTab === 'comments'
-                      ? 'border-emerald-600 text-emerald-700'
-                      : 'border-transparent text-slate-500 hover:text-slate-800'
-                  }`}
-                >
-                  <MessageSquare className="w-4 h-4" />
-                  <span>讨论与评论 ({comments.length})</span>
-                </button>
+              {/* Tabs header with child task aggregation toggle */}
+              <div className="flex flex-wrap items-center justify-between gap-3 border-b border-slate-200 pb-3">
+                <div className="flex items-center gap-4">
+                  <button
+                    onClick={() => setActiveTab('comments')}
+                    className={`flex items-center gap-2 text-xs font-bold pb-2 border-b-2 transition-all cursor-pointer ${
+                      activeTab === 'comments'
+                        ? 'border-emerald-600 text-emerald-700'
+                        : 'border-transparent text-slate-500 hover:text-slate-800'
+                    }`}
+                  >
+                    <MessageSquare className="w-4 h-4" />
+                    <span>讨论与评论 ({allRelatedComments.length})</span>
+                  </button>
 
-                <button
-                  onClick={() => setActiveTab('activities')}
-                  className={`flex items-center gap-2 text-xs font-bold pb-2 border-b-2 transition-all cursor-pointer ${
-                    activeTab === 'activities'
-                      ? 'border-emerald-600 text-emerald-700'
-                      : 'border-transparent text-slate-500 hover:text-slate-800'
-                  }`}
-                >
-                  <History className="w-4 h-4" />
-                  <span>动态履历 ({activities.length})</span>
-                </button>
+                  <button
+                    onClick={() => setActiveTab('activities')}
+                    className={`flex items-center gap-2 text-xs font-bold pb-2 border-b-2 transition-all cursor-pointer ${
+                      activeTab === 'activities'
+                        ? 'border-emerald-600 text-emerald-700'
+                        : 'border-transparent text-slate-500 hover:text-slate-800'
+                    }`}
+                  >
+                    <History className="w-4 h-4" />
+                    <span>动态履历 ({allRelatedActivities.length})</span>
+                  </button>
 
-                <button
-                  onClick={() => setActiveTab('feedbacks')}
-                  className={`flex items-center gap-2 text-xs font-bold pb-2 border-b-2 transition-all cursor-pointer ${
-                    activeTab === 'feedbacks'
-                      ? 'border-indigo-600 text-indigo-700'
-                      : 'border-transparent text-slate-500 hover:text-slate-800'
-                  }`}
-                >
-                  <ClipboardCheck className="w-4 h-4" />
-                  <span>开发反馈 ({feedbacks.length})</span>
-                </button>
+                  <button
+                    onClick={() => setActiveTab('feedbacks')}
+                    className={`flex items-center gap-2 text-xs font-bold pb-2 border-b-2 transition-all cursor-pointer ${
+                      activeTab === 'feedbacks'
+                        ? 'border-indigo-600 text-indigo-700'
+                        : 'border-transparent text-slate-500 hover:text-slate-800'
+                    }`}
+                  >
+                    <ClipboardCheck className="w-4 h-4" />
+                    <span>开发反馈 ({allRelatedFeedbacks.length})</span>
+                  </button>
+                </div>
+
+                {childTasks.length > 0 && (
+                  <label className="flex items-center gap-2 text-xs text-slate-700 font-semibold bg-slate-50 hover:bg-slate-100 px-3 py-1.5 rounded-xl cursor-pointer transition-all border border-slate-200/80 shadow-2xs">
+                    <input
+                      type="checkbox"
+                      checked={includeChildTaskFeedbacks}
+                      onChange={(e) => setIncludeChildTaskFeedbacks(e.target.checked)}
+                      className="w-3.5 h-3.5 rounded text-emerald-600 focus:ring-emerald-500 cursor-pointer"
+                    />
+                    <span>穿透汇总子任务动态 ({childTasks.length}个子任务)</span>
+                  </label>
+                )}
               </div>
 
               {/* Tab Content 1: Comments */}
@@ -742,32 +975,46 @@ export const TaskDetailPage: React.FC<TaskDetailPageProps> = ({
                 <div className="space-y-6">
                   {/* Comments feed */}
                   <div className="space-y-4 max-h-96 overflow-y-auto pr-1">
-                    {comments.length === 0 ? (
+                    {allRelatedComments.length === 0 ? (
                       <p className="text-xs text-slate-400 italic text-center py-6">
                         暂无讨论内容，在下方输入观点开启协同讨论...
                       </p>
                     ) : (
-                      comments.map((comment) => {
+                      allRelatedComments.map((comment) => {
                         const author = members.find((m) => m.id === comment.authorId);
                         return (
-                          <div key={comment.id} className="flex gap-3 text-xs bg-slate-50/80 p-3.5 rounded-2xl border border-slate-200/80">
-                            <img
-                              src={author?.avatar || 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=100'}
-                              alt={author?.name}
-                              className="w-8 h-8 rounded-full object-cover shrink-0 mt-0.5"
-                            />
-                            <div className="flex-1 space-y-1">
-                              <div className="flex items-center justify-between">
-                                <span className="font-bold text-slate-900">{author?.name || '未知成员'}</span>
-                                <span className="text-[10px] text-slate-400 font-mono">
-                                  {new Date(comment.createdAt).toLocaleTimeString('zh-CN', {
-                                    hour: '2-digit',
-                                    minute: '2-digit',
-                                  })}
-                                </span>
-                              </div>
-                              <div className="prose prose-slate max-w-none text-xs text-slate-700 leading-relaxed">
-                                <Markdown>{comment.content}</Markdown>
+                          <div key={comment.id} className="flex gap-3 text-xs bg-slate-50/80 p-3.5 rounded-2xl border border-slate-200/80 flex-col sm:flex-row">
+                            <div className="flex items-start gap-3 flex-1 min-w-0">
+                              <img
+                                src={author?.avatar || 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=100'}
+                                alt={author?.name}
+                                className="w-8 h-8 rounded-full object-cover shrink-0 mt-0.5"
+                              />
+                              <div className="flex-1 space-y-1 min-w-0">
+                                {/* 子任务来源标记 */}
+                                {comment.isChild && (
+                                  <div
+                                    onClick={() => onSelectTask && onSelectTask(comment.sourceTaskId)}
+                                    className="inline-flex items-center gap-1 text-[10px] font-bold text-indigo-700 bg-indigo-50 hover:bg-indigo-100 border border-indigo-200/80 px-2 py-0.5 rounded-md mb-1 cursor-pointer transition-all"
+                                    title="点击穿透查看该子任务"
+                                  >
+                                    <GitFork className="w-3 h-3 text-indigo-600" />
+                                    <span>来自子任务 [{comment.sourceTaskId}]: {comment.sourceTaskTitle}</span>
+                                    <ChevronRight className="w-3 h-3 text-indigo-500" />
+                                  </div>
+                                )}
+                                <div className="flex items-center justify-between">
+                                  <span className="font-bold text-slate-900">{author?.name || '未知成员'}</span>
+                                  <span className="text-[10px] text-slate-400 font-mono">
+                                    {new Date(comment.createdAt).toLocaleTimeString('zh-CN', {
+                                      hour: '2-digit',
+                                      minute: '2-digit',
+                                    })}
+                                  </span>
+                                </div>
+                                <div className="prose prose-slate max-w-none text-xs text-slate-700 leading-relaxed">
+                                  <Markdown>{comment.content}</Markdown>
+                                </div>
                               </div>
                             </div>
                           </div>
@@ -807,41 +1054,72 @@ export const TaskDetailPage: React.FC<TaskDetailPageProps> = ({
               {/* Tab Content 2: History Log */}
               {activeTab === 'activities' && (
                 <div className="space-y-3 max-h-96 overflow-y-auto">
-                  {activities.map((h: any) => {
-                    const actor = members.find((m) => m.id === (h.authorId || h.actorId));
-                    return (
-                      <div key={h.id} className="flex items-start gap-3 text-xs bg-slate-50 p-3 rounded-xl border border-slate-200">
-                        <img
-                          src={actor?.avatar || 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=100'}
-                          alt={actor?.name}
-                          className="w-6 h-6 rounded-full object-cover shrink-0 mt-0.5"
-                        />
-                        <div className="flex-1">
-                          <div className="text-slate-800 font-medium">
-                            <span className="font-bold text-slate-900">{actor?.name}</span> {h.action}
+                  {allRelatedActivities.length === 0 ? (
+                    <p className="text-xs text-slate-400 italic text-center py-6">暂无动态履历</p>
+                  ) : (
+                    allRelatedActivities.map((h: any) => {
+                      const actor = members.find((m) => m.id === (h.authorId || h.actorId));
+                      return (
+                        <div key={h.id} className="flex items-start gap-3 text-xs bg-slate-50 p-3 rounded-xl border border-slate-200">
+                          <img
+                            src={actor?.avatar || 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=100'}
+                            alt={actor?.name}
+                            className="w-6 h-6 rounded-full object-cover shrink-0 mt-0.5"
+                          />
+                          <div className="flex-1 space-y-0.5">
+                            {h.isChild && (
+                              <div
+                                onClick={() => onSelectTask && onSelectTask(h.sourceTaskId)}
+                                className="inline-flex items-center gap-1 text-[10px] font-bold text-indigo-700 bg-indigo-50 border border-indigo-200 px-2 py-0.5 rounded-md cursor-pointer mb-1"
+                              >
+                                <GitFork className="w-3 h-3 text-indigo-600" />
+                                <span>来自子任务 [{h.sourceTaskId}]</span>
+                              </div>
+                            )}
+                            <div className="text-slate-800 font-medium">
+                              <span className="font-bold text-slate-900">{actor?.name}</span> {h.action}
+                            </div>
+                            <span className="text-[10px] text-slate-400 font-mono">
+                              {new Date(h.timestamp).toLocaleString('zh-CN')}
+                            </span>
                           </div>
-                          <span className="text-[10px] text-slate-400 font-mono">
-                            {new Date(h.timestamp).toLocaleString('zh-CN')}
-                          </span>
                         </div>
-                      </div>
-                    );
-                  })}
+                      );
+                    })
+                  )}
                 </div>
               )}
 
               {/* Tab Content 3: Dev Feedback (结构化开发反馈) */}
               {activeTab === 'feedbacks' && (
                 <div className="space-y-4 max-h-96 overflow-y-auto pr-1">
-                  {feedbacks.length === 0 ? (
+                  {allRelatedFeedbacks.length === 0 ? (
                     <p className="text-xs text-slate-400 italic text-center py-6">
                       暂无开发反馈，Agent 完成开发后将通过 MCP 工具自动回写结构化结果
                     </p>
                   ) : (
-                    feedbacks.map((fb) => {
+                    allRelatedFeedbacks.map((fb) => {
                       const author = members.find((m) => m.id === fb.authorId);
                       return (
                         <div key={fb.id} className="bg-indigo-50/40 border border-indigo-200/60 rounded-2xl p-4 space-y-3">
+                          {/* 如果来自子任务，展示关联子任务头栏 */}
+                          {fb.isChild && (
+                            <div
+                              onClick={() => onSelectTask && onSelectTask(fb.sourceTaskId)}
+                              className="flex items-center justify-between text-xs font-bold text-indigo-900 bg-indigo-100/90 hover:bg-indigo-200/80 px-3 py-1.5 rounded-xl border border-indigo-300/80 cursor-pointer transition-all shadow-2xs"
+                              title="点击前往该子任务详情页"
+                            >
+                              <div className="flex items-center gap-1.5 min-w-0">
+                                <GitFork className="w-3.5 h-3.5 text-indigo-700 shrink-0" />
+                                <span className="text-[11px]">来源于子任务 [{fb.sourceTaskId}]: {fb.sourceTaskTitle}</span>
+                              </div>
+                              <span className="text-[10px] text-indigo-700 underline shrink-0 flex items-center gap-0.5">
+                                <span>跳转子任务</span>
+                                <ChevronRight className="w-3 h-3" />
+                              </span>
+                            </div>
+                          )}
+
                           {/* 反馈头部：作者 + 时间 */}
                           <div className="flex items-center justify-between">
                             <div className="flex items-center gap-2">
@@ -1212,6 +1490,194 @@ export const TaskDetailPage: React.FC<TaskDetailPageProps> = ({
               </div>
             </div>
 
+            {/* Task Tree & Dependencies Section */}
+            <div className="space-y-3 pt-2 border-t border-slate-100">
+              <label className="text-xs font-bold text-slate-700 block uppercase tracking-wider flex items-center justify-between">
+                <span className="flex items-center gap-1.5">
+                  <GitFork className="w-3.5 h-3.5 text-indigo-600" />
+                  <span>层级结构与前置依赖</span>
+                </span>
+              </label>
+
+              {/* 1. Parent Task Link */}
+              <div className="bg-slate-50 border border-slate-200 rounded-2xl p-3 space-y-1.5">
+                <span className="text-[11px] font-bold text-slate-500 block">父级任务 (Parent Task)</span>
+                {parentTask ? (
+                  <div
+                    onClick={() => onSelectTask && onSelectTask(parentTask.id)}
+                    className="flex items-center justify-between bg-white border border-slate-200 hover:border-indigo-300 p-2 rounded-xl cursor-pointer transition-all group shadow-2xs"
+                  >
+                    <div className="flex items-center gap-1.5 min-w-0">
+                      <span className="font-mono text-[10px] font-bold text-indigo-700 bg-indigo-50 px-1.5 py-0.5 rounded">
+                        {parentTask.id}
+                      </span>
+                      <span className="text-xs font-semibold text-slate-800 truncate group-hover:text-indigo-600">
+                        {parentTask.title}
+                      </span>
+                    </div>
+                    <ChevronRight className="w-3.5 h-3.5 text-slate-400 group-hover:text-indigo-600 shrink-0" />
+                  </div>
+                ) : isEditing ? (
+                  <select
+                    value={task.parentId || ''}
+                    onChange={(e) => onUpdateTask({ parentId: e.target.value || undefined })}
+                    className="w-full bg-white border border-slate-200 rounded-xl p-2 text-xs text-slate-800 focus:outline-none focus:border-indigo-500 cursor-pointer shadow-2xs"
+                  >
+                    <option value="">无 (作为顶级任务)</option>
+                    {allTasks
+                      .filter((t) => t.id !== task.id && !t.parentId)
+                      .map((t) => (
+                        <option key={t.id} value={t.id}>
+                          [{t.id}] {t.title}
+                        </option>
+                      ))}
+                  </select>
+                ) : (
+                  <span className="text-xs text-slate-400 italic block py-0.5">无 (顶级任务)</span>
+                )}
+              </div>
+
+              {/* 2. Subtasks List */}
+              <div className="bg-slate-50 border border-slate-200 rounded-2xl p-3 space-y-2">
+                <div className="flex items-center justify-between">
+                  <span className="text-[11px] font-bold text-slate-500">
+                    子任务列表 ({childTasks.length})
+                  </span>
+                  {onOpenCreateSubtask && (
+                    <button
+                      onClick={() => onOpenCreateSubtask(task.id)}
+                      className="text-[10px] bg-indigo-50 hover:bg-indigo-100 text-indigo-700 border border-indigo-200 font-bold px-2 py-0.5 rounded-lg transition-colors cursor-pointer flex items-center gap-0.5"
+                    >
+                      <Plus className="w-3 h-3" />
+                      <span>新建子任务</span>
+                    </button>
+                  )}
+                </div>
+
+                {childTasks.length > 0 ? (
+                  <div className="space-y-1.5 max-h-40 overflow-y-auto pr-0.5">
+                    {childTasks.map((ct) => (
+                      <div
+                        key={ct.id}
+                        onClick={() => onSelectTask && onSelectTask(ct.id)}
+                        className="flex items-center justify-between bg-white border border-slate-200 hover:border-indigo-300 p-2 rounded-xl cursor-pointer transition-all group shadow-2xs"
+                      >
+                        <div className="flex items-center gap-1.5 min-w-0">
+                          <span className="font-mono text-[10px] font-semibold text-slate-600 bg-slate-100 px-1.5 py-0.5 rounded">
+                            {ct.id}
+                          </span>
+                          <span className={`text-xs font-medium truncate ${ct.status === 'done' ? 'line-through text-slate-400' : 'text-slate-800 group-hover:text-indigo-600'}`}>
+                            {ct.title}
+                          </span>
+                        </div>
+                        <ChevronRight className="w-3.5 h-3.5 text-slate-400 group-hover:text-indigo-600 shrink-0" />
+                      </div>
+                    ))}
+                  </div>
+                ) : (
+                  <span className="text-xs text-slate-400 italic block py-0.5">暂无子任务</span>
+                )}
+              </div>
+
+              {/* 3. Predecessor Task Dependencies (Blocked By) */}
+              <div className="bg-slate-50 border border-slate-200 rounded-2xl p-3 space-y-2">
+                <div className="flex items-center justify-between">
+                  <span className="text-[11px] font-bold text-slate-500 flex items-center gap-1">
+                    <Link2 className="w-3 h-3 text-amber-600" />
+                    <span>前置依赖 (Blocked By)</span>
+                  </span>
+                  {incompletePredecessors.length > 0 && (
+                    <span className="text-[10px] bg-rose-100 text-rose-800 font-bold px-1.5 py-0.5 rounded">
+                      {incompletePredecessors.length} 未解锁
+                    </span>
+                  )}
+                </div>
+
+                {predecessorTasks.length > 0 ? (
+                  <div className="space-y-1.5">
+                    {predecessorTasks.map((pt) => {
+                      const isDone = pt.status === 'done';
+                      return (
+                        <div
+                          key={pt.id}
+                          onClick={() => onSelectTask && onSelectTask(pt.id)}
+                          className={`flex items-center justify-between p-2 rounded-xl border transition-all cursor-pointer group shadow-2xs ${
+                            isDone
+                              ? 'bg-emerald-50/50 border-emerald-200 text-emerald-900'
+                              : 'bg-amber-50/70 border-amber-200 text-amber-950 font-semibold'
+                          }`}
+                        >
+                          <div className="flex items-center gap-1.5 min-w-0">
+                            <span className="font-mono text-[10px] font-bold px-1.5 py-0.5 rounded bg-white border border-slate-200">
+                              {pt.id}
+                            </span>
+                            <span className="text-xs truncate">{pt.title}</span>
+                          </div>
+                          <span className={`text-[10px] font-bold px-1.5 py-0.5 rounded ${isDone ? 'bg-emerald-100 text-emerald-800' : 'bg-amber-200/80 text-amber-900'}`}>
+                            {isDone ? '已完成' : '未解锁'}
+                          </span>
+                        </div>
+                      );
+                    })}
+                  </div>
+                ) : (
+                  <span className="text-xs text-slate-400 italic block py-0.5">无前置依赖</span>
+                )}
+
+                {/* Edit Dependencies selector */}
+                {isEditing && (
+                  <div className="pt-1">
+                    <select
+                      value=""
+                      onChange={(e) => {
+                        const newId = e.target.value;
+                        if (!newId) return;
+                        const current = task.blockedByTaskIds || [];
+                        if (!current.includes(newId)) {
+                          onUpdateTask({ blockedByTaskIds: [...current, newId] });
+                        }
+                      }}
+                      className="w-full bg-white border border-slate-200 rounded-xl p-1.5 text-xs text-slate-800 focus:outline-none focus:border-amber-500 cursor-pointer"
+                    >
+                      <option value="">+ 添加前置依赖任务...</option>
+                      {allTasks
+                        .filter((t) => t.id !== task.id && !(task.blockedByTaskIds || []).includes(t.id))
+                        .map((t) => (
+                          <option key={t.id} value={t.id}>
+                            [{t.id}] {t.title}
+                          </option>
+                        ))}
+                    </select>
+                  </div>
+                )}
+              </div>
+
+              {/* 4. Blocking Tasks (Subsequent Impact) */}
+              {blockingTasks.length > 0 && (
+                <div className="bg-purple-50/60 border border-purple-200 rounded-2xl p-3 space-y-1.5">
+                  <span className="text-[11px] font-bold text-purple-900 block">
+                    ⚡ 后续等待此任务完成的项目 ({blockingTasks.length})
+                  </span>
+                  <div className="space-y-1">
+                    {blockingTasks.map((bt) => (
+                      <div
+                        key={bt.id}
+                        onClick={() => onSelectTask && onSelectTask(bt.id)}
+                        className="flex items-center justify-between bg-white border border-purple-200 p-2 rounded-xl cursor-pointer hover:border-purple-400 transition-all text-xs text-purple-950 font-medium shadow-2xs"
+                      >
+                        <span className="font-mono text-[10px] font-bold bg-purple-100 text-purple-800 px-1.5 py-0.5 rounded">
+                          {bt.id}
+                        </span>
+                        <span className="truncate flex-1 ml-1.5">{bt.title}</span>
+                        <ChevronRight className="w-3.5 h-3.5 text-purple-400 shrink-0" />
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+            </div>
+
             {/* Tags */}
             <div className="space-y-3 pt-2 border-t border-slate-100">
               <label className="text-xs font-bold text-slate-700 block uppercase tracking-wider">
@@ -1294,6 +1760,45 @@ export const TaskDetailPage: React.FC<TaskDetailPageProps> = ({
                 className="flex-1 bg-emerald-600 hover:bg-emerald-500 text-white px-4 py-2.5 rounded-xl text-xs font-semibold transition-colors cursor-pointer shadow-xs"
               >
                 确认完结
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* 彻底删除任务确认弹窗 */}
+      {showDeleteModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm animate-fadeIn" onClick={() => setShowDeleteModal(false)}>
+          <div className="bg-white rounded-3xl shadow-2xl p-6 max-w-sm w-full mx-4 space-y-4" onClick={(e) => e.stopPropagation()}>
+            <div className="flex items-center gap-3">
+              <div className="w-10 h-10 rounded-full bg-rose-100 flex items-center justify-center shrink-0">
+                <Trash2 className="w-5 h-5 text-rose-600" />
+              </div>
+              <div>
+                <h3 className="text-sm font-bold text-slate-900">确认彻底删除任务</h3>
+                <p className="text-xs text-slate-500 mt-0.5">
+                  确定要删除任务 <span className="font-mono font-bold text-slate-800">[{task.id}]</span> 吗？相关拆解的子任务也将一并清理，此操作无法撤销。
+                </p>
+              </div>
+            </div>
+            <div className="flex gap-2 pt-2">
+              <button
+                onClick={() => setShowDeleteModal(false)}
+                className="flex-1 bg-slate-100 hover:bg-slate-200 text-slate-700 px-4 py-2.5 rounded-xl text-xs font-semibold transition-colors cursor-pointer"
+              >
+                取消
+              </button>
+              <button
+                onClick={() => {
+                  if (onDeleteTask) {
+                    onDeleteTask(task.id);
+                  }
+                  setShowDeleteModal(false);
+                  onBack();
+                }}
+                className="flex-1 bg-rose-600 hover:bg-rose-500 text-white px-4 py-2.5 rounded-xl text-xs font-bold transition-colors cursor-pointer shadow-xs"
+              >
+                彻底删除
               </button>
             </div>
           </div>

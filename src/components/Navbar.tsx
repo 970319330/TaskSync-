@@ -18,6 +18,8 @@ import {
   LogOut,
   Lock,
   Server,
+  Upload,
+  Download,
 } from 'lucide-react';
 import { Project, Member, ViewMode, NotificationItem, Role } from '../types';
 import { hasPermission } from '../permissions';
@@ -41,6 +43,7 @@ interface NavbarProps {
   onOpenAiCopilot: () => void;
   onOpenCreateProject: () => void;
   onOpenManageProject: () => void;
+  onOpenImportExport?: (tab: 'import' | 'export', projectId?: string) => void;
   onOpenSettings: () => void;
   onOpenTeamModal: () => void;
   onOpenZentaoSync: () => void;
@@ -70,6 +73,7 @@ export const Navbar: React.FC<NavbarProps> = ({
   onOpenAiCopilot,
   onOpenCreateProject,
   onOpenManageProject,
+  onOpenImportExport,
   onOpenSettings,
   onOpenTeamModal,
   onOpenZentaoSync,
@@ -179,6 +183,30 @@ export const Navbar: React.FC<NavbarProps> = ({
                     <Settings className="w-4 h-4 shrink-0 text-slate-400" />
                     <span>管理项目</span>
                   </button>
+                  {onOpenImportExport && (
+                    <>
+                      <button
+                        onClick={() => {
+                          onOpenImportExport('import');
+                          setShowProjectMenu(false);
+                        }}
+                        className="w-full text-left px-3 py-2 text-sm flex items-center gap-2.5 text-slate-600 hover:bg-slate-50 transition-colors cursor-pointer"
+                      >
+                        <Upload className="w-4 h-4 shrink-0 text-slate-400" />
+                        <span>导入项目数据</span>
+                      </button>
+                      <button
+                        onClick={() => {
+                          onOpenImportExport('export', activeProject.id);
+                          setShowProjectMenu(false);
+                        }}
+                        className="w-full text-left px-3 py-2 text-sm flex items-center gap-2.5 text-slate-600 hover:bg-slate-50 transition-colors cursor-pointer"
+                      >
+                        <Download className="w-4 h-4 shrink-0 text-slate-400" />
+                        <span>导出当前项目</span>
+                      </button>
+                    </>
+                  )}
                 </div>
               </div>
             )}

@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
-import { Member, Project, TaskPriority, TaskStatus, ChecklistItem, Role, TaskColorKey, TASK_COLORS } from '../types';
+import { Member, Project, Task, TaskPriority, TaskStatus, ChecklistItem, Role, TaskColorKey, TASK_COLORS } from '../types';
 import { hasPermission } from '../permissions';
-import { X, Sparkles, Plus, Loader2, CheckSquare, Palette } from 'lucide-react';
+import { X, Sparkles, Plus, Loader2, CheckSquare, Palette, GitFork, Link2 } from 'lucide-react';
 import { RichTextEditor } from './RichTextEditor';
 
 interface CreateTaskModalProps {
@@ -11,6 +11,8 @@ interface CreateTaskModalProps {
   currentMember: Member;
   projects: Project[];
   activeProject: Project;
+  allTasks?: Task[];
+  initialParentId?: string;
   onClose: () => void;
   onSubmit: (newTask: {
     title: string;
@@ -19,6 +21,9 @@ interface CreateTaskModalProps {
     priority: TaskPriority;
     assigneeIds: string[];
     projectId: string;
+    milestoneId?: string;
+    parentId?: string;
+    blockedByTaskIds?: string[];
     startDate: string;
     dueDate: string;
     estimatedHours: number;
@@ -37,6 +42,8 @@ export const CreateTaskModal: React.FC<CreateTaskModalProps> = ({
   currentMember,
   projects,
   activeProject,
+  allTasks = [],
+  initialParentId,
   onClose,
   onSubmit,
 }) => {
@@ -46,6 +53,11 @@ export const CreateTaskModal: React.FC<CreateTaskModalProps> = ({
   const [priority, setPriority] = useState<TaskPriority>('medium');
   const [selectedAssigneeIds, setSelectedAssigneeIds] = useState<string[]>([]);
   const [projectId, setProjectId] = useState(activeProject.id);
+  const [milestoneId, setMilestoneId] = useState<string>(
+    activeProject.milestones?.[0]?.id || ''
+  );
+  const [parentId, setParentId] = useState<string>(initialParentId || '');
+  const [blockedByTaskIds, setBlockedByTaskIds] = useState<string[]>([]);
   const [startDate, setStartDate] = useState('2026-08-03');
   const [dueDate, setDueDate] = useState('2026-08-08');
   const [estimatedHours, setEstimatedHours] = useState(8);
@@ -159,6 +171,9 @@ export const CreateTaskModal: React.FC<CreateTaskModalProps> = ({
       priority,
       assigneeIds: finalAssigneeIds,
       projectId,
+      milestoneId: milestoneId || undefined,
+      parentId: parentId || undefined,
+      blockedByTaskIds: blockedByTaskIds.length > 0 ? blockedByTaskIds : undefined,
       startDate,
       dueDate,
       estimatedHours,
@@ -300,13 +315,17 @@ export const CreateTaskModal: React.FC<CreateTaskModalProps> = ({
                 <span className="text-[11px] text-slate-400 font-mono">TASK CONFIG</span>
               </div>
 
-              {/* Project & Status */}
+              {/* Project & Milestone */}
               <div className="grid grid-cols-2 gap-3.5 text-xs">
                 <div>
                   <label className="text-slate-700 font-semibold block mb-1">所属项目</label>
                   <select
                     value={projectId}
-                    onChange={(e) => setProjectId(e.target.value)}
+                    onChange={(e) => {
+                      setProjectId(e.target.value);
+                      const selP = projects.find((p) => p.id === e.target.value);
+                      setMilestoneId(selP?.milestones?.[0]?.id || '');
+                    }}
                     className="w-full bg-white border border-slate-200 rounded-xl p-2.5 text-slate-800 focus:outline-none focus:border-emerald-500 cursor-pointer shadow-2xs font-medium"
                   >
                     {projects.map((p) => (
@@ -318,19 +337,86 @@ export const CreateTaskModal: React.FC<CreateTaskModalProps> = ({
                 </div>
 
                 <div>
-                  <label className="text-slate-700 font-semibold block mb-1">初始状态</label>
+                  <label className="text-slate-700 font-semibold block mb-1">关联里程碑 (Milestone)</label>
                   <select
-                    value={status}
-                    onChange={(e) => setStatus(e.target.value as TaskStatus)}
+                    value={milestoneId}
+                    onChange={(e) => setMilestoneId(e.target.value)}
                     className="w-full bg-white border border-slate-200 rounded-xl p-2.5 text-slate-800 focus:outline-none focus:border-emerald-500 cursor-pointer shadow-2xs font-medium"
                   >
-                    <option value="backlog">Backlog 积压</option>
-                    <option value="todo">待办 (To Do)</option>
-                    <option value="in_progress">进行中 (In Progress)</option>
-                    <option value="review">测试 (Test)</option>
-                    <option value="done">已完成 (Done)</option>
+                    <option value="">未关联里程碑</option>
+                    {(
+                      projects.find((p) => p.id === projectId)?.milestones ||
+                      activeProject.milestones ||
+                      []
+                    ).map((m) => (
+                      <option key={m.id} value={m.id}>
+                        🚩 {m.title}
+                      </option>
+                    ))}
                   </select>
                 </div>
+              </div>
+
+              {/* Parent Task & Predecessor Dependencies */}
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3.5 text-xs">
+                <div>
+                  <label className="text-slate-700 font-semibold block mb-1 flex items-center gap-1">
+                    <GitFork className="w-3.5 h-3.5 text-indigo-600" />
+                    <span>父级任务 (Parent Task)</span>
+                  </label>
+                  <select
+                    value={parentId}
+                    onChange={(e) => setParentId(e.target.value)}
+                    className="w-full bg-white border border-slate-200 rounded-xl p-2.5 text-slate-800 focus:outline-none focus:border-emerald-500 cursor-pointer shadow-2xs font-medium"
+                  >
+                    <option value="">无 (独立主任务)</option>
+                    {allTasks
+                      .filter((t) => !t.parentId) // only top-level tasks as parent candidates
+                      .map((t) => (
+                        <option key={t.id} value={t.id}>
+                          [{t.id}] {t.title}
+                        </option>
+                      ))}
+                  </select>
+                </div>
+
+                <div>
+                  <label className="text-slate-700 font-semibold block mb-1 flex items-center gap-1">
+                    <Link2 className="w-3.5 h-3.5 text-amber-600" />
+                    <span>前置依赖任务 (Blocked By)</span>
+                  </label>
+                  <select
+                    value={blockedByTaskIds[0] || ''}
+                    onChange={(e) => {
+                      const val = e.target.value;
+                      setBlockedByTaskIds(val ? [val] : []);
+                    }}
+                    className="w-full bg-white border border-slate-200 rounded-xl p-2.5 text-slate-800 focus:outline-none focus:border-emerald-500 cursor-pointer shadow-2xs font-medium"
+                  >
+                    <option value="">无前置依赖 (随时可启动)</option>
+                    {allTasks.map((t) => (
+                      <option key={t.id} value={t.id}>
+                        🚫 [{t.id}] {t.title} ({t.status === 'done' ? '已完成' : '未完成'})
+                      </option>
+                    ))}
+                  </select>
+                </div>
+              </div>
+
+              {/* Status */}
+              <div>
+                <label className="text-slate-700 font-semibold block mb-1 text-xs">初始状态</label>
+                <select
+                  value={status}
+                  onChange={(e) => setStatus(e.target.value as TaskStatus)}
+                  className="w-full bg-white border border-slate-200 rounded-xl p-2.5 text-xs text-slate-800 focus:outline-none focus:border-emerald-500 cursor-pointer shadow-2xs font-medium"
+                >
+                  <option value="backlog">Backlog 积压</option>
+                  <option value="todo">待办 (To Do)</option>
+                  <option value="in_progress">进行中 (In Progress)</option>
+                  <option value="review">测试 (Test)</option>
+                  <option value="done">已完成 (Done)</option>
+                </select>
               </div>
 
               {/* Priority */}

@@ -157,16 +157,69 @@ app.get('/api/state', (req, res) => {
 // Create Project
 app.post('/api/projects', (req, res) => {
   const data = req.body || {};
+  const projectId = `proj_${Date.now()}`;
   const newProject: Project = {
-    id: `proj_${Date.now()}`,
+    id: projectId,
     name: (data.name || '').trim() || '新项目空间',
     key: (data.key || '').trim().toUpperCase() || `PRJ-${projects.length + 1}`,
     description: data.description || '',
     color: data.color || 'emerald',
     memberIds: Array.isArray(data.memberIds) ? data.memberIds : [],
+    template: data.template || 'custom',
+    milestones: Array.isArray(data.milestones)
+      ? data.milestones.map((m: any, idx: number) => ({
+          ...m,
+          id: m.id || `ms_${projectId}_${idx + 1}`,
+          projectId,
+        }))
+      : [],
   };
+
   projects = [...projects, newProject];
-  res.json({ success: true, project: newProject, projects });
+
+  // If initial tasks are provided (from milestone templates)
+  if (Array.isArray(data.initialTasks) && data.initialTasks.length > 0) {
+    const createdTasks: Task[] = data.initialTasks.map((t: any, idx: number) => {
+      const now = new Date();
+      const nowIso = now.toISOString();
+      const taskId = `task_${projectId}_init_${idx + 1}`;
+      return {
+        id: taskId,
+        title: t.title || '初始化任务',
+        description: t.description || '',
+        status: t.status || 'todo',
+        priority: t.priority || 'medium',
+        assigneeIds: Array.isArray(t.assigneeIds) && t.assigneeIds.length > 0 ? t.assigneeIds : (newProject.memberIds.slice(0, 2)),
+        reporterId: t.reporterId || (newProject.memberIds[0] || 'usr_alex'),
+        projectId,
+        milestoneId: t.milestoneId || undefined,
+        startDate: t.startDate || nowIso.split('T')[0],
+        dueDate: t.dueDate || new Date(now.getTime() + 7 * 86400000).toISOString().split('T')[0],
+        estimatedHours: t.estimatedHours || 8,
+        loggedHours: 0,
+        tags: Array.isArray(t.tags) ? t.tags : ['预设任务'],
+        checklist: [],
+        comments: [],
+        activities: [
+          {
+            id: `act_${taskId}_init`,
+            taskId,
+            authorId: t.reporterId || 'usr_alex',
+            action: '创建任务',
+            details: `基于 ${newProject.name} 模版向导自动初始化生成`,
+            timestamp: now.toLocaleString(),
+          },
+        ],
+        attachmentsCount: 0,
+        createdAt: nowIso,
+        updatedAt: nowIso,
+      };
+    });
+
+    tasks = [...tasks, ...createdTasks];
+  }
+
+  res.json({ success: true, project: newProject, projects, tasks });
 });
 
 // Update Project
@@ -183,12 +236,14 @@ app.put('/api/projects/:id', (req, res) => {
         ...(updates.description !== undefined ? { description: updates.description } : {}),
         ...(updates.color !== undefined ? { color: updates.color } : {}),
         ...(Array.isArray(updates.memberIds) ? { memberIds: updates.memberIds } : {}),
+        ...(updates.template !== undefined ? { template: updates.template } : {}),
+        ...(Array.isArray(updates.milestones) ? { milestones: updates.milestones } : {}),
       };
       return updated;
     }
     return p;
   });
-  res.json({ success: true, project: updated, projects });
+  res.json({ success: true, project: updated, projects, tasks });
 });
 
 // Delete Project
@@ -198,6 +253,143 @@ app.delete('/api/projects/:id', (req, res) => {
   // 级联清理该项目的任务,避免孤儿任务
   tasks = tasks.filter((t) => t.projectId !== id);
   res.json({ success: true, projects, tasks });
+});
+
+// Export Single or All Projects
+app.get('/api/projects/:id/export', (req, res) => {
+  const { id } = req.params;
+  if (id === 'all') {
+    return res.json({
+      version: '2.0',
+      exportedAt: new Date().toISOString(),
+      type: 'all_projects',
+      projects,
+      tasks,
+      members: members.map((m) => ({ id: m.id, name: m.name, role: m.role, email: m.email })),
+    });
+  }
+
+  const proj = projects.find((p) => p.id === id);
+  if (!proj) {
+    return res.status(404).json({ error: '未找到指定项目' });
+  }
+
+  const projTasks = tasks.filter((t) => t.projectId === id);
+  res.json({
+    version: '2.0',
+    exportedAt: new Date().toISOString(),
+    type: 'single_project',
+    project: proj,
+    tasks: projTasks,
+    members: members
+      .filter((m) => proj.memberIds.includes(m.id))
+      .map((m) => ({ id: m.id, name: m.name, role: m.role, email: m.email })),
+  });
+});
+
+// Import Project
+app.post('/api/projects/import', (req, res) => {
+  const { project, tasks: importedTasks = [], mode = 'create_new' } = req.body || {};
+
+  if (!project || !project.name) {
+    return res.status(400).json({ error: '无效的项目数据，缺乏项目基本信息' });
+  }
+
+  let finalProject: Project;
+  let finalTasks: Task[] = [];
+
+  if (mode === 'create_new') {
+    const newProjectId = `proj_${Date.now()}`;
+    const timestampStr = Date.now().toString().slice(-4);
+
+    let key = (project.key || 'PRJ').toUpperCase();
+    if (projects.some((p) => p.key === key)) {
+      key = `${key}_${timestampStr}`;
+    }
+
+    finalProject = {
+      id: newProjectId,
+      name: project.name.includes('(导入)') ? project.name : `${project.name} (导入)`,
+      key,
+      description: project.description || '',
+      color: project.color || 'emerald',
+      memberIds: Array.isArray(project.memberIds) ? project.memberIds : [],
+    };
+
+    finalTasks = (importedTasks as Task[]).map((t, idx) => ({
+      ...t,
+      id: `task_imp_${Date.now()}_${idx}`,
+      projectId: newProjectId,
+      title: t.title || '未命名任务',
+      status: t.status || 'todo',
+      priority: t.priority || 'medium',
+      assigneeIds: Array.isArray(t.assigneeIds) ? t.assigneeIds : [],
+      reporterId: t.reporterId || 'usr_alex',
+      startDate: t.startDate || new Date().toISOString().split('T')[0],
+      dueDate: t.dueDate || new Date().toISOString().split('T')[0],
+      estimatedHours: t.estimatedHours || 0,
+      loggedHours: t.loggedHours || 0,
+      tags: Array.isArray(t.tags) ? t.tags : [],
+      checklist: Array.isArray(t.checklist) ? t.checklist : [],
+      comments: Array.isArray(t.comments) ? t.comments : [],
+      activities: Array.isArray(t.activities) ? t.activities : [],
+      createdAt: t.createdAt || new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+    }));
+
+    projects = [...projects, finalProject];
+    tasks = [...tasks, ...finalTasks];
+  } else {
+    // mode === 'overwrite'
+    const existingIndex = projects.findIndex(
+      (p) => p.id === project.id || (project.key && p.key === project.key.toUpperCase())
+    );
+
+    if (existingIndex >= 0) {
+      const targetId = projects[existingIndex].id;
+      finalProject = {
+        ...projects[existingIndex],
+        name: project.name || projects[existingIndex].name,
+        description: project.description ?? projects[existingIndex].description,
+        color: project.color || projects[existingIndex].color,
+        memberIds: Array.isArray(project.memberIds) ? project.memberIds : projects[existingIndex].memberIds,
+      };
+      projects[existingIndex] = finalProject;
+
+      tasks = tasks.filter((t) => t.projectId !== targetId);
+      finalTasks = (importedTasks as Task[]).map((t, idx) => ({
+        ...t,
+        id: t.id || `task_${Date.now()}_${idx}`,
+        projectId: targetId,
+        updatedAt: new Date().toISOString(),
+      }));
+      tasks = [...tasks, ...finalTasks];
+    } else {
+      finalProject = {
+        id: project.id || `proj_${Date.now()}`,
+        name: project.name,
+        key: (project.key || 'PRJ').toUpperCase(),
+        description: project.description || '',
+        color: project.color || 'emerald',
+        memberIds: Array.isArray(project.memberIds) ? project.memberIds : [],
+      };
+      finalTasks = (importedTasks as Task[]).map((t, idx) => ({
+        ...t,
+        id: t.id || `task_${Date.now()}_${idx}`,
+        projectId: finalProject.id,
+      }));
+      projects = [...projects, finalProject];
+      tasks = [...tasks, ...finalTasks];
+    }
+  }
+
+  res.json({
+    success: true,
+    project: finalProject,
+    importedTaskCount: finalTasks.length,
+    projects,
+    tasks,
+  });
 });
 
 // Get AI Settings (API Key 脱敏返回，返回全量各供应商 Key 与配置状态)
@@ -377,6 +569,9 @@ app.post('/api/tasks', (req, res) => {
     assigneeIds: newTaskData.assigneeIds || [],
     reporterId: newTaskData.reporterId || 'usr_alex',
     projectId: newTaskData.projectId || 'proj_cloud',
+    milestoneId: newTaskData.milestoneId || undefined,
+    parentId: newTaskData.parentId || undefined,
+    blockedByTaskIds: Array.isArray(newTaskData.blockedByTaskIds) ? newTaskData.blockedByTaskIds : [],
     startDate: newTaskData.startDate || nowStr.substring(0, 10),
     dueDate: newTaskData.dueDate || nowStr.substring(0, 10),
     estimatedHours: Number(newTaskData.estimatedHours) || 8,
@@ -586,7 +781,7 @@ app.put('/api/tasks/:id', (req, res) => {
 // Delete Task
 app.delete('/api/tasks/:id', (req, res) => {
   const { id } = req.params;
-  tasks = tasks.filter((t) => t.id !== id);
+  tasks = tasks.filter((t) => t.id !== id && t.parentId !== id);
   res.json({ success: true, tasks });
 });
 

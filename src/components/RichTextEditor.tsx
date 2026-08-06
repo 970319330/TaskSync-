@@ -93,52 +93,70 @@ export const RichTextEditor: React.FC<RichTextEditorProps> = ({
     onChange(value ? `${value.trim()}\n${templateText}` : templateText.trim());
   };
 
+  const renderFormattedContent = (content: string) => {
+    if (!content) return <span className="text-slate-400 italic font-sans">*暂无详细正文描述*</span>;
+
+    const hasHtmlTags = /<[a-z][\s\S]*>/i.test(content);
+    if (hasHtmlTags) {
+      return (
+        <div
+          className="prose prose-slate max-w-none text-xs text-slate-800 leading-relaxed font-sans space-y-2 [&_p]:mb-2 [&_p]:leading-relaxed [&_strong]:font-bold [&_strong]:text-slate-900 [&_ul]:list-disc [&_ul]:pl-5 [&_ol]:list-decimal [&_ol]:pl-5 [&_li]:mb-1 [&_h1]:text-base [&_h1]:font-extrabold [&_h2]:text-sm [&_h2]:font-bold [&_h3]:text-xs [&_h3]:font-bold [&_blockquote]:border-l-3 [&_blockquote]:border-emerald-500 [&_blockquote]:bg-emerald-50/60 [&_blockquote]:pl-3 [&_blockquote]:py-1 [&_blockquote]:my-2"
+          dangerouslySetInnerHTML={{ __html: content }}
+        />
+      );
+    }
+
+    return (
+      <Markdown
+        components={{
+          h1: ({ children }) => <h1 className="text-base font-extrabold text-slate-900 border-b border-slate-200 pb-1 mt-3 mb-2">{children}</h1>,
+          h2: ({ children }) => <h2 className="text-sm font-bold text-slate-900 border-b border-slate-200/60 pb-1 mt-3 mb-1.5">{children}</h2>,
+          h3: ({ children }) => <h3 className="text-xs font-bold text-slate-900 mt-2.5 mb-1 flex items-center gap-1.5">{children}</h3>,
+          p: ({ children }) => <p className="mb-2 leading-relaxed text-slate-700">{children}</p>,
+          ul: ({ children }) => <ul className="list-disc list-inside mb-2 space-y-1 pl-1">{children}</ul>,
+          ol: ({ children }) => <ol className="list-decimal list-inside mb-2 space-y-1 pl-1">{children}</ol>,
+          li: ({ children }) => <li className="text-slate-700 font-normal">{children}</li>,
+          blockquote: ({ children }) => (
+            <blockquote className="border-l-3 border-emerald-500 bg-emerald-50/60 pl-3 py-1.5 my-2 text-slate-700 rounded-r-lg italic">
+              {children}
+            </blockquote>
+          ),
+          pre: ({ children }) => (
+            <pre className="bg-slate-900 text-slate-100 p-3 rounded-xl text-[11px] font-mono overflow-x-auto my-2 border border-slate-800 shadow-xs [&>code]:bg-transparent [&>code]:text-slate-100 [&>code]:p-0 [&>code]:border-none">
+              {children}
+            </pre>
+          ),
+          code: ({ children, className }: any) => (
+            <code className={`font-mono text-[11px] bg-slate-200/80 text-emerald-800 px-1.5 py-0.5 rounded border border-slate-300/60 ${className || ''}`}>
+              {children}
+            </code>
+          ),
+          a: ({ href, children }) => (
+            <a href={href} target="_blank" rel="noreferrer" className="text-emerald-600 underline font-medium hover:text-emerald-700">
+              {children}
+            </a>
+          ),
+          strong: ({ children }) => <strong className="font-bold text-slate-900">{children}</strong>,
+          table: ({ children }) => (
+            <div className="overflow-x-auto my-2">
+              <table className="min-w-full divide-y divide-slate-200 text-xs border border-slate-200 rounded-lg overflow-hidden">
+                {children}
+              </table>
+            </div>
+          ),
+          th: ({ children }) => <th className="bg-slate-100 px-3 py-1.5 text-left font-bold text-slate-700 border-b border-slate-200">{children}</th>,
+          td: ({ children }) => <td className="px-3 py-1.5 border-b border-slate-100 text-slate-700">{children}</td>,
+        }}
+      >
+        {content}
+      </Markdown>
+    );
+  };
+
   if (readOnly) {
     return (
       <div className="prose prose-slate max-w-none text-xs text-slate-800 leading-relaxed font-sans bg-slate-50/70 p-4 rounded-xl border border-slate-200">
-        <Markdown
-          components={{
-            h1: ({ children }) => <h1 className="text-base font-extrabold text-slate-900 border-b border-slate-200 pb-1 mt-3 mb-2">{children}</h1>,
-            h2: ({ children }) => <h2 className="text-sm font-bold text-slate-900 border-b border-slate-200/60 pb-1 mt-3 mb-1.5">{children}</h2>,
-            h3: ({ children }) => <h3 className="text-xs font-bold text-slate-900 mt-2.5 mb-1 flex items-center gap-1.5">{children}</h3>,
-            p: ({ children }) => <p className="mb-2 leading-relaxed text-slate-700">{children}</p>,
-            ul: ({ children }) => <ul className="list-disc list-inside mb-2 space-y-1 pl-1">{children}</ul>,
-            ol: ({ children }) => <ol className="list-decimal list-inside mb-2 space-y-1 pl-1">{children}</ol>,
-            li: ({ children }) => <li className="text-slate-700 font-normal">{children}</li>,
-            blockquote: ({ children }) => (
-              <blockquote className="border-l-3 border-emerald-500 bg-emerald-50/60 pl-3 py-1.5 my-2 text-slate-700 rounded-r-lg italic">
-                {children}
-              </blockquote>
-            ),
-            pre: ({ children }) => (
-              <pre className="bg-slate-900 text-slate-100 p-3 rounded-xl text-[11px] font-mono overflow-x-auto my-2 border border-slate-800 shadow-xs [&>code]:bg-transparent [&>code]:text-slate-100 [&>code]:p-0 [&>code]:border-none">
-                {children}
-              </pre>
-            ),
-            code: ({ children, className }: any) => (
-              <code className={`font-mono text-[11px] bg-slate-200/80 text-emerald-800 px-1.5 py-0.5 rounded border border-slate-300/60 ${className || ''}`}>
-                {children}
-              </code>
-            ),
-            a: ({ href, children }) => (
-              <a href={href} target="_blank" rel="noreferrer" className="text-emerald-600 underline font-medium hover:text-emerald-700">
-                {children}
-              </a>
-            ),
-            strong: ({ children }) => <strong className="font-bold text-slate-900">{children}</strong>,
-            table: ({ children }) => (
-              <div className="overflow-x-auto my-2">
-                <table className="min-w-full divide-y divide-slate-200 text-xs border border-slate-200 rounded-lg overflow-hidden">
-                  {children}
-                </table>
-              </div>
-            ),
-            th: ({ children }) => <th className="bg-slate-100 px-3 py-1.5 text-left font-bold text-slate-700 border-b border-slate-200">{children}</th>,
-            td: ({ children }) => <td className="px-3 py-1.5 border-b border-slate-100 text-slate-700">{children}</td>,
-          }}
-        >
-          {value || '*暂无详细正文描述*'}
-        </Markdown>
+        {renderFormattedContent(value)}
       </div>
     );
   }
@@ -351,49 +369,7 @@ export const RichTextEditor: React.FC<RichTextEditorProps> = ({
 
         {mode === 'preview' && (
           <div style={{ minHeight }} className="p-4 bg-slate-50/50">
-            <Markdown
-              components={{
-                h1: ({ children }) => <h1 className="text-base font-extrabold text-slate-900 border-b border-slate-200 pb-1 mt-3 mb-2">{children}</h1>,
-                h2: ({ children }) => <h2 className="text-sm font-bold text-slate-900 border-b border-slate-200/60 pb-1 mt-3 mb-1.5">{children}</h2>,
-                h3: ({ children }) => <h3 className="text-xs font-bold text-slate-900 mt-2.5 mb-1 flex items-center gap-1.5">{children}</h3>,
-                p: ({ children }) => <p className="mb-2 leading-relaxed text-slate-700">{children}</p>,
-                ul: ({ children }) => <ul className="list-disc list-inside mb-2 space-y-1 pl-1">{children}</ul>,
-                ol: ({ children }) => <ol className="list-decimal list-inside mb-2 space-y-1 pl-1">{children}</ol>,
-                li: ({ children }) => <li className="text-slate-700 font-normal">{children}</li>,
-                blockquote: ({ children }) => (
-                  <blockquote className="border-l-3 border-emerald-500 bg-emerald-50/60 pl-3 py-1.5 my-2 text-slate-700 rounded-r-lg italic">
-                    {children}
-                  </blockquote>
-                ),
-                pre: ({ children }) => (
-                  <pre className="bg-slate-900 text-slate-100 p-3 rounded-xl text-[11px] font-mono overflow-x-auto my-2 border border-slate-800 shadow-xs [&>code]:bg-transparent [&>code]:text-slate-100 [&>code]:p-0 [&>code]:border-none">
-                    {children}
-                  </pre>
-                ),
-                code: ({ children, className }: any) => (
-                  <code className={`font-mono text-[11px] bg-slate-200/80 text-emerald-800 px-1.5 py-0.5 rounded border border-slate-300/60 ${className || ''}`}>
-                    {children}
-                  </code>
-                ),
-                a: ({ href, children }) => (
-                  <a href={href} target="_blank" rel="noreferrer" className="text-emerald-600 underline font-medium hover:text-emerald-700">
-                    {children}
-                  </a>
-                ),
-                strong: ({ children }) => <strong className="font-bold text-slate-900">{children}</strong>,
-                table: ({ children }) => (
-                  <div className="overflow-x-auto my-2">
-                    <table className="min-w-full divide-y divide-slate-200 text-xs border border-slate-200 rounded-lg overflow-hidden">
-                      {children}
-                    </table>
-                  </div>
-                ),
-                th: ({ children }) => <th className="bg-slate-100 px-3 py-1.5 text-left font-bold text-slate-700 border-b border-slate-200">{children}</th>,
-                td: ({ children }) => <td className="px-3 py-1.5 border-b border-slate-100 text-slate-700">{children}</td>,
-              }}
-            >
-              {value || '*暂无详细正文描述，请在上方或编辑模式下补充...*'}
-            </Markdown>
+            {renderFormattedContent(value)}
           </div>
         )}
 
@@ -408,40 +384,7 @@ export const RichTextEditor: React.FC<RichTextEditorProps> = ({
               className="w-full p-3.5 text-xs text-slate-800 placeholder-slate-400 focus:outline-none resize-none font-mono leading-relaxed"
             />
             <div style={{ minHeight }} className="p-3.5 bg-slate-50/50 overflow-y-auto">
-              <Markdown
-                components={{
-                  h1: ({ children }) => <h1 className="text-base font-extrabold text-slate-900 border-b border-slate-200 pb-1 mt-2 mb-2">{children}</h1>,
-                  h2: ({ children }) => <h2 className="text-sm font-bold text-slate-900 border-b border-slate-200/60 pb-1 mt-2 mb-1.5">{children}</h2>,
-                  h3: ({ children }) => <h3 className="text-xs font-bold text-slate-900 mt-2 mb-1 flex items-center gap-1.5">{children}</h3>,
-                  p: ({ children }) => <p className="mb-2 leading-relaxed text-slate-700 text-xs">{children}</p>,
-                  ul: ({ children }) => <ul className="list-disc list-inside mb-2 space-y-1 pl-1 text-xs">{children}</ul>,
-                  ol: ({ children }) => <ol className="list-decimal list-inside mb-2 space-y-1 pl-1 text-xs">{children}</ol>,
-                  li: ({ children }) => <li className="text-slate-700 font-normal">{children}</li>,
-                  blockquote: ({ children }) => (
-                    <blockquote className="border-l-3 border-emerald-500 bg-emerald-50/60 pl-3 py-1 my-2 text-slate-700 rounded-r-lg italic text-xs">
-                      {children}
-                    </blockquote>
-                  ),
-                  pre: ({ children }) => (
-                    <pre className="bg-slate-900 text-slate-100 p-2.5 rounded-xl text-[10px] font-mono overflow-x-auto my-2 border border-slate-800 shadow-xs [&>code]:bg-transparent [&>code]:text-slate-100 [&>code]:p-0 [&>code]:border-none">
-                      {children}
-                    </pre>
-                  ),
-                  code: ({ children, className }: any) => (
-                    <code className={`font-mono text-[10px] bg-slate-200/80 text-emerald-800 px-1 py-0.5 rounded border border-slate-300/60 ${className || ''}`}>
-                      {children}
-                    </code>
-                  ),
-                  a: ({ href, children }) => (
-                    <a href={href} target="_blank" rel="noreferrer" className="text-emerald-600 underline font-medium hover:text-emerald-700">
-                      {children}
-                    </a>
-                  ),
-                  strong: ({ children }) => <strong className="font-bold text-slate-900">{children}</strong>,
-                }}
-              >
-                {value || '*实时渲染预览中...*'}
-              </Markdown>
+              {renderFormattedContent(value)}
             </div>
           </div>
         )}

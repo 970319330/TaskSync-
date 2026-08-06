@@ -13,6 +13,8 @@ import {
   Folder,
   ExternalLink,
   Eraser,
+  Download,
+  Upload,
 } from 'lucide-react';
 
 interface ProjectManageModalProps {
@@ -23,6 +25,7 @@ interface ProjectManageModalProps {
   onUpdateProject: (id: string, data: Partial<Project>) => void;
   onDeleteProject: (id: string) => void;
   onSelectProject: (p: Project) => void;
+  onOpenImportExport?: (tab: 'import' | 'export', projectId?: string) => void;
 }
 
 const COLOR_DOT: Record<string, string> = {
@@ -46,6 +49,7 @@ export const ProjectManageModal: React.FC<ProjectManageModalProps> = ({
   onUpdateProject,
   onDeleteProject,
   onSelectProject,
+  onOpenImportExport,
 }) => {
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editName, setEditName] = useState('');
@@ -114,15 +118,37 @@ export const ProjectManageModal: React.FC<ProjectManageModalProps> = ({
             </div>
             <div>
               <h2 className="font-bold text-slate-900 text-base sm:text-lg">项目管理</h2>
-              <p className="text-[11px] text-slate-500">共 {projects.length} 个项目空间,可编辑或删除</p>
+              <p className="text-[11px] text-slate-500">共 {projects.length} 个项目空间,可编辑、导出或导入</p>
             </div>
           </div>
-          <button
-            onClick={onClose}
-            className="p-1.5 rounded-full text-slate-400 hover:text-slate-800 hover:bg-slate-200/60 transition-colors cursor-pointer"
-          >
-            <X className="w-5 h-5" />
-          </button>
+          <div className="flex items-center gap-2">
+            {onOpenImportExport && (
+              <>
+                <button
+                  onClick={() => onOpenImportExport('import')}
+                  className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-emerald-50 hover:bg-emerald-100 text-emerald-700 text-xs font-semibold transition-colors cursor-pointer"
+                  title="导入项目数据"
+                >
+                  <Upload className="w-3.5 h-3.5" />
+                  <span className="hidden sm:inline">导入项目</span>
+                </button>
+                <button
+                  onClick={() => onOpenImportExport('export', 'all')}
+                  className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-semibold transition-colors cursor-pointer"
+                  title="打包导出全量数据"
+                >
+                  <Download className="w-3.5 h-3.5" />
+                  <span className="hidden sm:inline">打包导出</span>
+                </button>
+              </>
+            )}
+            <button
+              onClick={onClose}
+              className="p-1.5 rounded-full text-slate-400 hover:text-slate-800 hover:bg-slate-200/60 transition-colors cursor-pointer ml-1"
+            >
+              <X className="w-5 h-5" />
+            </button>
+          </div>
         </div>
 
         {/* Project List */}
@@ -212,6 +238,15 @@ export const ProjectManageModal: React.FC<ProjectManageModalProps> = ({
                           className="text-[11px] font-semibold text-emerald-700 hover:text-emerald-800 bg-emerald-50 hover:bg-emerald-100 px-2.5 py-1.5 rounded-lg transition-colors cursor-pointer"
                         >
                           切换
+                        </button>
+                      )}
+                      {onOpenImportExport && (
+                        <button
+                          onClick={() => onOpenImportExport('export', p.id)}
+                          className="p-1.5 rounded-lg text-slate-500 hover:text-emerald-700 hover:bg-emerald-50 transition-colors cursor-pointer"
+                          title="导出此项目"
+                        >
+                          <Download className="w-4 h-4" />
                         </button>
                       )}
                       <button

@@ -130,6 +130,16 @@ export interface TaskFeedback {
   createdAt: string;
 }
 
+export interface Milestone {
+  id: string;
+  projectId: string;
+  title: string;
+  description?: string;
+  dueDate: string;
+  status: 'planned' | 'in_progress' | 'completed' | 'delayed';
+  color?: string;
+}
+
 export interface Task {
   id: string;
   title: string;
@@ -139,6 +149,7 @@ export interface Task {
   assigneeIds: string[];
   reporterId: string;
   projectId: string;
+  milestoneId?: string;
   dueDate: string;
   startDate: string;
   estimatedHours: number;
@@ -155,6 +166,10 @@ export interface Task {
   completeDevAndFlow?: boolean;
   // 任务颜色标记（可选）
   color?: string;
+  // 父子任务结构：父任务 ID (可选)
+  parentId?: string;
+  // 前置依赖关系：阻塞当前任务的前置任务 ID 列表 (Blocked By)
+  blockedByTaskIds?: string[];
   // 来源禅道账号（从禅道同步的任务才有，用于多账号隔离）
   zentaoAccount?: string;
   createdAt: string;
@@ -168,6 +183,8 @@ export interface Project {
   description: string;
   color: string;
   memberIds: string[];
+  template?: string;
+  milestones?: Milestone[];
 }
 
 export interface ChatMessage {

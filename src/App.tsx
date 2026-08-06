@@ -12,6 +12,7 @@ import {
   AiSettings,
   AiProvider,
   Role,
+  Milestone,
 } from './types';
 import { Navbar } from './components/Navbar';
 import { MemberPresenceBar } from './components/MemberPresenceBar';
@@ -30,6 +31,7 @@ import { TeamManagementPage } from './components/TeamManagementPage';
 import { AiCopilotDrawer } from './components/AiCopilotDrawer';
 import { Login } from './components/Login';
 import { ZentaoSyncModal } from './components/ZentaoSyncModal';
+import { ProjectImportExportModal } from './components/ProjectImportExportModal';
 import { hasPermission } from './permissions';
 import logoUrl from './assets/logo.png';
 import { Loader2 } from 'lucide-react';
@@ -92,6 +94,7 @@ export default function App() {
   const [selectedTask, setSelectedTask] = useState<Task | null>(null);
   const [showCreateTaskModal, setShowCreateTaskModal] = useState(false);
   const [createTaskInitialStatus, setCreateTaskInitialStatus] = useState<TaskStatus>('todo');
+  const [createTaskParentId, setCreateTaskParentId] = useState<string | undefined>(undefined);
   const [showCreateProjectModal, setShowCreateProjectModal] = useState(false);
   const [showManageProjectModal, setShowManageProjectModal] = useState(false);
   const [showSettingsModal, setShowSettingsModal] = useState(false);
@@ -102,6 +105,21 @@ export default function App() {
   const [aiSummary, setAiSummary] = useState('');
   const [isGeneratingSummary, setIsGeneratingSummary] = useState(false);
   const [showZentaoSyncModal, setShowZentaoSyncModal] = useState(false);
+  const [showImportExportModal, setShowImportExportModal] = useState(false);
+  const [importExportTab, setImportExportTab] = useState<'import' | 'export'>('export');
+  const [importExportProjectId, setImportExportProjectId] = useState<string | undefined>(undefined);
+
+  const handleOpenImportExport = (tab: 'import' | 'export' = 'export', projectId?: string) => {
+    setImportExportTab(tab);
+    setImportExportProjectId(projectId);
+    setShowImportExportModal(true);
+  };
+
+  const handleImportSuccess = (importedProject: Project, updatedProjects: Project[], updatedTasks: Task[]) => {
+    setProjects(updatedProjects);
+    setTasks(updatedTasks);
+    setActiveProject(importedProject);
+  };
 
   // Initial Fetch State
   // loginMemberId：登录场景下显式传入成员 ID，避免读取到闭包中过期的 loggedInMemberId
@@ -319,6 +337,9 @@ export default function App() {
     description: string;
     color: string;
     memberIds: string[];
+    template?: string;
+    milestones?: Milestone[];
+    initialTasks?: any[];
   }, importContent?: string) => {
     try {
       const res = await fetch('/api/projects', {
@@ -329,6 +350,9 @@ export default function App() {
       const result = await res.json();
       if (result.projects) {
         setProjects(result.projects);
+        if (result.tasks) {
+          setTasks(result.tasks);
+        }
         if (result.project) {
           setActiveProject(result.project);
 
@@ -641,6 +665,7 @@ export default function App() {
         onOpenAiCopilot={() => setShowAiCopilotDrawer(true)}
         onOpenCreateProject={() => setShowCreateProjectModal(true)}
         onOpenManageProject={() => setShowManageProjectModal(true)}
+        onOpenImportExport={handleOpenImportExport}
         onOpenSettings={() => setShowSettingsModal(true)}
         onOpenTeamModal={() => setShowTeamModal(true)}
         onOpenZentaoSync={() => setShowZentaoSyncModal(true)}
@@ -664,11 +689,18 @@ export default function App() {
         {selectedTask ? (
           <TaskDetailPage
             task={selectedTask}
+            allTasks={visibleProjectTasks}
             members={visibleMembers}
             roles={roles}
             currentMember={currentMember}
             projectName={activeProject.name}
             onBack={() => setSelectedTask(null)}
+            onSelectTask={handleOpenTaskById}
+            onOpenCreateSubtask={(parentTaskId) => {
+              setCreateTaskParentId(parentTaskId);
+              setCreateTaskInitialStatus('todo');
+              setShowCreateTaskModal(true);
+            }}
             onUpdateTask={handleUpdateTask}
             onAddComment={handleAddComment}
             onDeleteTask={handleDeleteTask}
@@ -693,6 +725,7 @@ export default function App() {
                 searchQuery={searchQuery}
                 onTaskClick={(t) => setSelectedTask(t)}
                 onUpdateTaskStatus={handleUpdateTaskStatus}
+                onDeleteTask={handleDeleteTask}
                 onOpenCreateTaskWithStatus={(status) => {
                   setCreateTaskInitialStatus(status);
                   setShowCreateTaskModal(true);
@@ -722,6 +755,7 @@ export default function App() {
               <GanttChart
                 tasks={visibleProjectTasks}
                 members={visibleMembers}
+                activeProject={activeProject}
                 onTaskClick={(t) => setSelectedTask(t)}
               />
             )}
@@ -730,6 +764,7 @@ export default function App() {
               <AnalyticsDashboard
                 tasks={visibleProjectTasks}
                 members={visibleMembers}
+                activeProject={activeProject}
                 onGenerateAiSummary={handleGenerateAiSummary}
                 aiSummary={aiSummary}
                 isGeneratingSummary={isGeneratingSummary}
@@ -762,7 +797,12 @@ export default function App() {
           currentMember={currentMember}
           projects={visibleProjects}
           activeProject={activeProject}
-          onClose={() => setShowCreateTaskModal(false)}
+          allTasks={visibleProjectTasks}
+          initialParentId={createTaskParentId}
+          onClose={() => {
+            setShowCreateTaskModal(false);
+            setCreateTaskParentId(undefined);
+          }}
           onSubmit={handleCreateTask}
         />
       )}
@@ -786,6 +826,21 @@ export default function App() {
           onUpdateProject={handleUpdateProject}
           onDeleteProject={handleDeleteProject}
           onSelectProject={(p) => setActiveProject(p)}
+          onOpenImportExport={handleOpenImportExport}
+        />
+      )}
+
+      {/* Project Import & Export Modal */}
+      {showImportExportModal && (
+        <ProjectImportExportModal
+          projects={projects}
+          tasks={tasks}
+          members={members}
+          activeProject={activeProject || projects[0]}
+          onClose={() => setShowImportExportModal(false)}
+          onImportSuccess={handleImportSuccess}
+          initialTab={importExportTab}
+          selectedProjectId={importExportProjectId}
         />
       )}
 
